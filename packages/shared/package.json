@@ -1,0 +1,26 @@
+{
+  "name": "@zerolance/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ZeroLance shared domain helpers — spec hashing, deliverable hashing, score computation.",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "node --import tsx --test $(find src -name '*.test.ts' 2>/dev/null | sort)"
+  },
+  "dependencies": {
+    "@zerolance/config": "workspace:*",
+    "ethers": "^6.16.0",
+    "viem": "^2.21.45"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}

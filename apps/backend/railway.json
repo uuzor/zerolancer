@@ -1,0 +1,13 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "buildCommand": "pnpm --filter @zerolance/config build && pnpm --filter @zerolance/shared build && pnpm --filter @zerolance/backend build"
+  },
+  "deploy": {
+    "startCommand": "node apps/backend/dist/index.js",
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 120,
+    "restartPolicy": "ON_FAILURE"
+  },
+  "watchPatterns": ["apps/backend/**", "packages/config/**", "packages/shared/**"]
+}

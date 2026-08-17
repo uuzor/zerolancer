@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+out/
+cache/
+.turbo/
+node_modules/.cache/
+
+# Foundry
+apps/contracts/cache/
+apps/contracts/out/
+apps/contracts/broadcast/
+apps/contracts/lib/
+
+# Data / runtime
+.data/
+data/
+*.log
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Deployer secrets (private keys)
+.deploy/

@@ -1,0 +1,38 @@
+import { z } from "zod";
+import { hexString } from "@zerolance/config/types/hex";
+import { sharedEnvSchema } from "@zerolance/config/env-schema";
+
+export const backendEnvSchema = sharedEnvSchema.merge(
+  z.object({
+    ZERO_ORACLE_URL: z.string().url(),
+    ZERO_EVM_RPC: z.string().url(),
+    ZERO_SENTRY_DSN: z.string().optional(),
+    ZERO_STORAGE_RPC: z.string().url().optional(),
+    INDEXER_POLL_WINDOW_BLOCKS: z.coerce.number().int().positive().default(500),
+    INDEXER_START_BLOCK: z.coerce.number().int().nonnegative().optional(),
+    ZERO_COMPUTE_API_KEY: z.string().optional(),
+    ZERO_TEE_SIGNER_PK: z.string(),
+    DEPLOYER_PK: z.preprocess((v) => (v === "" ? undefined : v), hexString.optional()),
+    ZERO_RUNTIME_SIGNER_PK: z.string().optional(),
+    ZERO_OPERATOR_PK: z.string().optional(),
+    ZERO_COMPUTE_MODEL: z.string().optional(),
+    ZERO_PORT: z.coerce.number().int().positive().default(3000),
+    PORT: z.coerce.number().int().positive().optional(),
+    ZERO_BIND: z.string().default("0.0.0.0"),
+    ZERO_MOCK_USDC_ADDRESS: z.string().optional(),
+    ZERO_TOKEN_ADDRESS: z.string().optional(),
+    ZERO_TEE_VERIFIER_ADDRESS: z.string().optional(),
+    ZERO_TASK_REGISTRY_ADDRESS: z.string().optional(),
+    ZERO_ESCROW_VAULT_ADDRESS: z.string().optional(),
+    ZERO_ARBITRATION_ADDRESS: z.string().optional(),
+    ZERO_REPUTATION_NFT_ADDRESS: z.string().optional(),
+    ZERO_GITHUB_TOKEN: z.string().optional(),
+    ZERO_GITHUB_OAUTH_CLIENT_ID: z.string().optional(),
+    ZERO_GITHUB_OAUTH_CLIENT_SECRET: z.string().optional(),
+    ZERO_GITHUB_OAUTH_REDIRECT_URI: z.string().url().optional(),
+    ZERO_GITHUB_WEBHOOK_SECRET: z.string().optional(),
+    ZERO_SANDBOX_IMAGE: z.string().default("node:22-alpine"),
+    ZERO_VERIFICATION_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+  }),
+);
+export type BackendEnv = z.infer<typeof backendEnvSchema>;

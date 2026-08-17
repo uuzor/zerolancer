@@ -1,0 +1,34 @@
+{
+  "network": "galileo",
+  "chainId": 16602,
+  "rpcUrl": "https://evmrpc-testnet.0g.ai",
+  "blockExplorer": "https://chainscan-galileo.0g.ai",
+  "deployer": "0x8f5467Da242d12f2471a905536403bfdf5dFA4Ff",
+  "deployedAt": "2026-08-13T12:30:00Z",
+  "proxies": {
+    "usdc": "0xc39D3b195A79F3c5c46D24f21FDBCeD8f401Dc26",
+    "zeroToken": "0x8294dC4b02C9A158a2E67Fe1CC64D02B611c83aF",
+    "teeVerifier": "0x54Abe294618A3aDd3eD8e51accB70e9A3efc4a65",
+    "reputationNFT": "0xCe019EcEE7AF37B767FB40446Eb44f926668957f",
+    "taskRegistry": "0xCaDF22870b719a4795D74567Ed499E8554f0253D",
+    "arbitration": "0xBB71d79A8019905CcAa6b028B7De3910b320D129",
+    "escrow": "0x45a3A6D48e533576973d1a77FF114af3d1aEC228"
+  },
+  "implementations": {
+    "zeroTokenImpl": "0xd8336bfE0A714adddb3ff28FEF218D39440B899b",
+    "teeVerifierImpl": "0x57cc91C8f4993c6B7E38108e33Dd94F4D8E744BE",
+    "reputationNFTImpl": "0x0Ac304885b760C4f289b1a8CADe615EEBCC22ec57",
+    "taskRegistryImpl": "0xbE2f5b300e05896B042A04b872730C38b4d5C156",
+    "arbitrationImpl": "0x655A250cF249aC59253242447A00654106917234",
+    "escrowImpl": "0xB80DfAA2Ec4BCA1f20708c082c76e0531dE1C08b"
+  },
+  "verification": {
+    "erc7857InterfaceId": "0x593fade8",
+    "erc7857MetadataInterfaceId": "0x79c62539",
+    "reputationNFTSupportsERC7857": true,
+    "reputationNFTSupportsERC7857Metadata": true,
+    "reputationNFTSupportsERC721": true,
+    "allTransactionsSucceeded": true,
+    "totalTransactions": 18
+  }
+}

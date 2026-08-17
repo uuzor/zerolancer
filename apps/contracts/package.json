@@ -1,0 +1,30 @@
+{
+  "name": "@zerolance/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ZeroLance smart contracts — ZeroLanceTaskRegistry, ZeroLanceEscrowVault, ZeroLanceArbitration, ZeroLanceReputationNFT (ERC-7857), ZeroLanceToken, ZeroLanceTeeVerifier",
+  "license": "MIT",
+  "main": "index.js",
+  "scripts": {
+    "build": "forge build && bash scripts/generate-abis.sh",
+    "test": "forge test -vv",
+    "generate-abis": "bash scripts/generate-abis.sh",
+    "coverage": "forge coverage",
+    "format": "forge fmt",
+    "format:check": "forge fmt --check",
+    "lint:sol": "solhint 'src/**/*.sol' 'test/**/*.sol' 'script/**/*.sol'",
+    "lint:fix": "solhint --fix 'src/**/*.sol' 'test/**/*.sol' 'script/**/*.sol'",
+    "lint": "forge fmt --check",
+    "typecheck": "tsc --noEmit",
+    "deploy:galileo": "forge script script/Deploy.s.sol --rpc-url ${OG_RPC_URL:-https://evmrpc-testnet.0g.ai} --chain-id 16602 --broadcast --priority-gas-price 3000000000 --legacy --slow",
+    "deploy:mainnet": "forge script script/Deploy.s.sol --rpc-url ${OG_RPC_URL:-https://evmrpc.0g.ai} --chain-id 16661 --broadcast --slow"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "5.0.2",
+    "@openzeppelin/contracts-upgradeable": "5.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.4"
+  }
+}

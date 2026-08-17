@@ -1,0 +1,243 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import {ERC721Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+
+import {IERC7857} from "./interfaces/IERC7857.sol";
+import {IERC7857Metadata, IntelligentData} from "./interfaces/IERC7857Metadata.sol";
+import {
+    AccessProof,
+    IERC7857DataVerifier,
+    OwnershipProof,
+    TransferValidityProof,
+    TransferValidityProofOutput
+} from "./interfaces/IERC7857DataVerifier.sol";
+
+import {Utils} from "./libraries/Utils.sol";
+
+/// @title ERC7857Upgradeable
+/// @notice Base ERC-7857 implementation: token transfer with re-encrypted metadata.
+/// @dev Adapted from the 0G Agentic ID reference (MIT). Bare ERC-721 transfers
+///      (transferFrom / safeTransferFrom) are blocked unless invoked through the
+///      proof-verified `iTransfer` / `iTransferFrom` path.
+abstract contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
+    event Transferred(uint256 indexed _tokenId, address indexed _from, address indexed _to);
+
+    /// @custom:storage-location erc7857:0g.storage.ERC7857
+    struct ERC7857Storage {
+        mapping(address owner => address) accessAssistants;
+        IERC7857DataVerifier verifier;
+        uint256[50] __gap;
+    }
+
+    // keccak256(abi.encode(keccak256("0g.storage.ERC7857") - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant STORAGE_LOCATION = 0xa2b40c657abdbf180a6038c081d3a0af6206dcea36f4558f991bf8c787ef3c00;
+
+    function _getERC7857Storage() private pure returns (ERC7857Storage storage $) {
+        assembly {
+            $.slot := STORAGE_LOCATION
+        }
+    }
+
+    constructor() {
+        _disableInitializers();
+    }
+
+    function __ERC7857_init(
+        string memory name_,
+        string memory symbol_,
+        address verifier_
+    ) internal onlyInitializing {
+        __ERC721_init(name_, symbol_);
+        __ERC7857_init_unchained(verifier_);
+    }
+
+    function __ERC7857_init_unchained(address verifier_) internal onlyInitializing {
+        _setVerifier(verifier_);
+    }
+
+    function _setVerifier(address verifier_) internal {
+        ERC7857Storage storage $ = _getERC7857Storage();
+        $.verifier = IERC7857DataVerifier(verifier_);
+    }
+
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        virtual
+        override(ERC721Upgradeable, IERC165)
+        returns (bool)
+    {
+        return interfaceId == type(IERC7857).interfaceId
+            || interfaceId == type(IERC7857Metadata).interfaceId
+            || super.supportsInterface(interfaceId);
+    }
+
+    function delegateAccess(address assistant) public virtual {
+        if (assistant == address(0)) {
+            revert ERC7857InvalidAssistant(assistant);
+        }
+        ERC7857Storage storage $ = _getERC7857Storage();
+        $.accessAssistants[msg.sender] = assistant;
+        emit DelegateAccess(msg.sender, assistant);
+    }
+
+    function getDelegateAccess(address user) public view virtual returns (address) {
+        return _getERC7857Storage().accessAssistants[user];
+    }
+
+    function _proofCheck(
+        address from,
+        address to,
+        uint256 tokenId,
+        TransferValidityProof[] memory proofs
+    ) internal returns (bytes[] memory sealedKeys) {
+        ERC7857Storage storage $ = _getERC7857Storage();
+        if (to == address(0)) {
+            revert ERC721InvalidReceiver(to);
+        }
+        if (_ownerOf(tokenId) != from) {
+            revert ERC721InvalidSender(from);
+        }
+        if (proofs.length == 0) {
+            revert ERC7857EmptyProof();
+        }
+
+        TransferValidityProofOutput[] memory proofOutput =
+            $.verifier.verifyTransferValidity(proofs, to, address(this));
+
+        IntelligentData[] memory datas = _intelligentDatasOf(tokenId);
+
+        if (proofOutput.length != datas.length) {
+            revert ERC7857ProofCountMismatch();
+        }
+
+        sealedKeys = new bytes[](proofOutput.length);
+        address accessAssistant = $.accessAssistants[to];
+
+        for (uint256 i = 0; i < proofOutput.length; i++) {
+            if (proofOutput[i].dataHash != datas[i].dataHash) {
+                revert ERC7857DataHashMismatch();
+            }
+
+            if (proofOutput[i].accessAssistant != accessAssistant && proofOutput[i].accessAssistant != to) {
+                revert ERC7857AccessAssistantMismatch();
+            }
+
+            bytes memory wantedKey = proofOutput[i].wantedKey;
+            bytes memory targetPubkey = proofOutput[i].targetPubkey;
+            if (wantedKey.length == 0) {
+                address defaultWantedReceiver = Utils.pubKeyToAddress(targetPubkey);
+                if (defaultWantedReceiver != to) {
+                    revert ERC7857WantedReceiverMismatch();
+                }
+            } else {
+                if (!Utils.bytesEqual(targetPubkey, wantedKey)) {
+                    revert ERC7857TargetPubkeyMismatch();
+                }
+            }
+
+            sealedKeys[i] = proofOutput[i].sealedKey;
+        }
+    }
+
+    /// @dev Non-zero while iTransfer path runs; bare ERC-721 transfers blocked via `_update`.
+    uint256 private _iTransferDepth;
+
+    error UseITransferWithProofs();
+
+    function _transfer(
+        address from,
+        address to,
+        uint256 tokenId,
+        TransferValidityProof[] memory proofs
+    ) internal {
+        _checkAuthorized(from, _msgSender(), tokenId);
+        bytes[] memory sealedKeys = _proofCheck(from, to, tokenId, proofs);
+        _iTransferDepth += 1;
+        safeTransferFrom(from, to, tokenId);
+        _iTransferDepth -= 1;
+        emit PublishedSealedKey(to, tokenId, sealedKeys);
+        emit Transferred(tokenId, from, to);
+    }
+
+    /// @dev Block marketplace-style bare transfers; mint/burn and iTransfer still work.
+    function _update(address to, uint256 tokenId, address auth)
+        internal
+        virtual
+        override
+        returns (address)
+    {
+        address from = _ownerOf(tokenId);
+        if (from != address(0) && to != address(0) && _iTransferDepth == 0) {
+            revert UseITransferWithProofs();
+        }
+        return super._update(to, tokenId, auth);
+    }
+
+    function iTransferFrom(
+        address from,
+        address to,
+        uint256 tokenId,
+        TransferValidityProof[] calldata proofs
+    ) public virtual {
+        _transfer(from, to, tokenId, proofs);
+    }
+
+    function iTransfer(
+        address to,
+        uint256 tokenId,
+        TransferValidityProof[] calldata proofs
+    ) public virtual {
+        address from = _ownerOf(tokenId);
+        if (from == address(0)) revert ERC721NonexistentToken(tokenId);
+        _checkAuthorized(from, _msgSender(), tokenId);
+        _transfer(from, to, tokenId, proofs);
+    }
+
+    function _intelligentDatasOf(uint256 /*tokenId*/)
+        internal
+        view
+        virtual
+        returns (IntelligentData[] memory)
+    {
+        return new IntelligentData[](0);
+    }
+
+    function _intelligentDatasLengthOf(uint256 /*tokenId*/)
+        internal
+        view
+        virtual
+        returns (uint256)
+    {
+        return 0;
+    }
+
+    function _updateData(uint256 tokenId, IntelligentData[] memory newDatas) internal virtual {}
+
+    function intelligentDatasOf(uint256 tokenId)
+        public
+        view
+        virtual
+        returns (IntelligentData[] memory)
+    {
+        if (_ownerOf(tokenId) == address(0)) {
+            revert ERC721NonexistentToken(tokenId);
+        }
+        return _intelligentDatasOf(tokenId);
+    }
+
+    function intelligentDataOf(uint256 tokenId)
+        external
+        view
+        virtual
+        returns (IntelligentData[] memory data)
+    {
+        return intelligentDatasOf(tokenId);
+    }
+
+    function verifier() public view virtual returns (IERC7857DataVerifier) {
+        return _getERC7857Storage().verifier;
+    }
+}

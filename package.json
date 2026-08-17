@@ -1,0 +1,48 @@
+{
+  "name": "zerolancer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ZeroLance — permissionless freelance escrow & dispute resolution on 0G. AI-verified escrow, GitHub-native workflows, on-chain reputation (ERC-7857 iNFT), multi-sig arbitration, streaming escrow, $ZERO tokenomics.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.22.0"
+  },
+  "packageManager": "pnpm@10.22.0",
+  "scripts": {
+    "build": "pnpm --filter @zerolance/config build && pnpm --filter @zerolance/oracle build && pnpm --filter @zerolance/backend build",
+    "build:all": "pnpm build && pnpm --filter @zerolance/frontend build",
+    "start": "node apps/backend/dist/index.js",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm -r run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,sol,md,json,yml,yaml}\" --ignore-path .gitignore",
+    "format:check": "prettier --check \"**/*.{ts,tsx,sol,md,json,yml,yaml}\" --ignore-path .gitignore",
+    "clean": "pnpm -r exec rm -rf dist build out cache .turbo node_modules/.cache"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4",
+    "prettier": "^3.3.3",
+    "eslint": "^9.14.0",
+    "@eslint/js": "^10.0.1",
+    "typescript-eslint": "^8.62.1",
+    "solhint": "^5.0.0",
+    "husky": "^9.1.4",
+    "lint-staged": "^15.2.8"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.sol": [
+      "solhint"
+    ],
+    "*.md": [
+      "prettier --write"
+    ]
+  }
+}
