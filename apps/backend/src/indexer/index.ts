@@ -38,6 +38,11 @@ export class Indexer {
         block: this.lastBlock,
         source: this.cfg.source,
       });
+    } else {
+      log.info("indexer backfilling from configured start block", {
+        startBlock: this.lastBlock,
+        source: this.cfg.source,
+      });
     }
     await this.poll();
     this.timer = setInterval(() => {
@@ -61,8 +66,13 @@ export class Indexer {
       return this.lastBlock;
     });
     if (current <= this.lastBlock) return;
+    const gap = current - this.lastBlock;
+    // Use a larger window when far behind (backfill), capped to avoid RPC limits.
+    const window = gap > this.cfg.pollWindowBlocks * 4
+      ? Math.min(gap, 10_000)
+      : this.cfg.pollWindowBlocks;
     const from = this.lastBlock + 1;
-    const to = Math.min(current, from + this.cfg.pollWindowBlocks - 1);
+    const to = Math.min(current, from + window - 1);
     try {
       const events = (await this.cfg.contract.queryFilter(
         "*",
@@ -75,11 +85,13 @@ export class Indexer {
         const eventName = decoded?.name ?? "Unknown";
         const payload: Record<string, unknown> = {};
         if (decoded) {
-          for (const [key, value] of Object.entries(decoded.args)) {
-            if (typeof key === "string" && !/^\d+$/.test(key)) {
-              payload[key] = typeof value === "bigint" ? value.toString() : value;
-            }
-          }
+          // ethers v6 Result only exposes array indices via Object.entries;
+          // use the fragment's named inputs to build a keyed payload.
+          const inputs = decoded.fragment.inputs;
+          decoded.args.toArray().forEach((value, i) => {
+            const name = inputs[i]?.name || `arg${i}`;
+            payload[name] = typeof value === "bigint" ? value.toString() : value;
+          });
         }
         store.append({
           source: this.cfg.source,

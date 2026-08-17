@@ -16,6 +16,7 @@ import { Wallet } from "ethers";
 import { HTTP, type AddressName } from "@zerolance/config";
 import {
   ZEROLANCE_ESCROW_VAULT_ABI,
+  ZEROLANCE_TASK_REGISTRY_ABI,
   ZEROLANCE_ARBITRATION_ABI,
   ZEROLANCE_REPUTATION_NFT_ABI,
 } from "@zerolance/config";
@@ -153,6 +154,11 @@ export async function createApp(env: BackendEnv): Promise<{
       source: string;
     };
     const defs: IndexerDef[] = [
+      {
+        address: addresses.taskRegistry,
+        abi: [...ZEROLANCE_TASK_REGISTRY_ABI],
+        source: "task-registry",
+      },
       {
         address: addresses.escrowVault,
         abi: [...ZEROLANCE_ESCROW_VAULT_ABI],
