@@ -35,6 +35,10 @@ export interface RouteOptions<S extends z.ZodTypeAny | undefined = undefined> {
   schema?: S;
   requireId?: boolean;
   requireAddress?: AddressKey;
+  /// Gate the route behind the server API key (owner of ZERO_RUNTIME_SIGNER).
+  /// Equivalent to the old `requireServerAuth` app.use that never fired because
+  /// it was mounted after the router. Replaces it with per-route enforcement.
+  requireServer?: boolean;
   broadcast?: string;
   consumer?: string;
   description?: string;
@@ -58,6 +62,18 @@ export function createRoute<S extends z.ZodTypeAny | undefined = undefined>(
   });
   routeFn(opts.path, async (req: Request, res: Response, next: NextFunction) => {
     try {
+      if (opts.requireServer) {
+        const principal = (req as { authPrincipal?: string }).authPrincipal;
+        if (principal !== "server" && principal !== "disabled") {
+          sendError(
+            res,
+            HTTP.FORBIDDEN,
+            "forbidden: server API key required",
+            "SERVER_KEY_REQUIRED",
+          );
+          return;
+        }
+      }
       if (opts.requireId) {
         const idParam = typeof req.params.id === "string" ? req.params.id : null;
         if (!idParam) {

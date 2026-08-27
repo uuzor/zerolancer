@@ -64,10 +64,11 @@ function resolveAccount(req: Request, res: Response, config: ServerConfig): Gith
   const account = getGithubStore().getAccountByToken(token);
   if (account) return account;
 
-  // PAT service-account mode: if the bearer matches the server/client API key
-  // and a GitHub PAT is configured, synthesize a service account.
+  // PAT service-account mode: if the bearer matches the server API key (never
+  // the weaker client key) and a GitHub PAT is configured, synthesize a
+  // service account. Server-to-server only.
   const pat = config.env.ZERO_GITHUB_TOKEN;
-  if (pat && (token === config.env.ZERO_API_KEY || token === config.env.ZERO_CLIENT_API_KEY)) {
+  if (pat && token === config.env.ZERO_API_KEY) {
     return {
       githubId: 0,
       login: "service-account",

@@ -78,9 +78,12 @@ export class EscrowClient {
       verdict.signature,
     ];
     const tx = await (this.escrow.contract as {
-      submitVerdict: (v: unknown[]) => Promise<{ wait: () => Promise<unknown> }>;
+      submitVerdict: (v: unknown[]) => Promise<{
+        hash: `0x${string}`;
+        wait: () => Promise<unknown>;
+      }>;
     }).submitVerdict(args);
     await tx.wait();
-    return tx as unknown as Hex;
+    return tx.hash;
   }
 }
