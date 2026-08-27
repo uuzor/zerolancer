@@ -80,7 +80,81 @@ Test suites (54 tests total, all passing):
 - Default model: `0gm-1.0-35b-a3b` (0G in-house model)
 - Note: chat completions require 0G account inference credits; models list is free
 
+## Wave Funding (Buildathon + Issue)
+- Contacts: `ZeroLanceWaveProgram`, `ZeroLanceWaveIssue`, `ZeroLanceWaveBuildathon`
+  in `apps/contracts/src/zerolancewave/`; contract tests in
+  `apps/contracts/test/WaveFunding.t.sol` (14 passing via `forge test`).
+- ABIs: hand-authored, readable-name files in `packages/config/src/abis/`
+  (`zeroLanceWaveProgram.ts`, `zeroLanceWaveIssue.ts`, `zeroLanceWaveBuildathon.ts`,
+  `pointsLedger.ts`) re-exported as `ZEROLANCE_WAVE_*_ABI` /
+  `ZEROLANCE_POINTS_LEDGER_ABI` from `packages/config/src/abis/index.ts`.
+- Client: `apps/backend/src/wave/client.ts` (`WaveClient`) Ñ reads + signer writes.
+  Constructed in `server.ts` config only when all three `ZERO_WAVE_*_ADDRESS` env vars
+  are set (optional until contracts are deployed); otherwise `waveClient` is `null`.
+- Routers: `apps/backend/src/routers/wave.ts` Ñ `/v1/wave/program/:id`,
+  `/v1/wave/program/:id/wave/:waveId`, `/v1/wave/program/:id/meta`,
+  `/v1/wave/program/:id/claimable`, `/v1/wave/issue/:id`,
+  `/v1/wave/buildathon/submission/:id`, plus signer-gated deposit/open-wave/claim/finalize.
+  Returns `WAVE_NOT_CONFIGURED` (503) when addresses absent. BigInts serialized via
+  `bigintReplacer`.
+- Three wave indexers are registered in `server.ts` (wave-program/issue/buildathon) but
+  skip when their address env vars are unset.
+
+## 0G Storage Integration
+- `apps/backend/src/storage/service.ts` (`StorageService`) Ñ uploads artifacts to 0G
+  Storage via `ZeroGStorage`, or deterministic in-memory fallback (`InMemoryStorage`,
+  keccak addressable) when no signer/storage RPC. `backend` is `"0g" | "in-memory"`.
+- Env: `ZERO_STORAGE_RPC` (defaults via `resolveStorageRpc()`), `ZERO_EVM_RPC`, and the
+  runtime/operator PK becomes the signer. Init in `server.ts` before the DA publisher.
+- Routers: `apps/backend/src/routers/storage.ts` Ñ `/v1/storage/upload-json`, `/v1/storage/download/:rootHash`, `/v1/storage/status`.
+
+## DA Publisher (event anchoring)
+- `apps/backend/src/da/publisher.ts` (`DaPublisher`) Ñ batches Events appended through the
+  `EventStore` and anchors each batch as a content-addressed 0G Storage blob. Produces a
+  merkle-style `batchRoot` over sorted (eventName, payload) leaves; the blob is retrievable
+  by its 0G content `rootHash`.
+- `events/store.ts` gains `setDaPublisher()` (wired in `server.ts`), a DA enqueue hook in
+  `append()`, and `daCommitments()` accessor.
+- Routers: `apps/backend/src/routers/da.ts` Ñ `/v1/da/publish`, `/v1/da/commitments`, `/v1/da/summary`.
+- Env: `ZERO_DA_MAX_BATCH_EVENTS` (default 50), `ZERO_DA_FLUSH_INTERVAL_MS` (default 5000).
+- Unit tests: `apps/backend/src/da/publisher.test.ts` (StorageService + DaPublisher,
+  in-memory backend).
+- `DaCommitment` exposes both `batchRoot` (verifiable commitment) and `rootHash` (blob key).
+
 ## Known Issues
 - ABI warnings for struct fragments (`struct Verdict`, `struct Task`, etc.) â€” non-fatal, viem
   parser doesn't accept inline struct definitions in ABI fragments
 - `ZERO_COMPUTE_API_KEY` can list models but returns 401 on chat â€” external account credits issue
+
+## Wave Funding (Buildathon + Issue)
+- Contracts: `ZeroLanceWaveProgram`, `ZeroLanceWaveIssue`, `ZeroLanceWaveBuildathon`
+  in `apps/contracts/src/zerolancewave/`; tests in `apps/contracts/test/WaveFunding.t.sol`.
+- ABIs: hand-authored readable-name files in `packages/config/src/abis/`
+  re-exported as `ZEROLANCE_WAVE_*_ABI` / `ZEROLANCE_POINTS_LEDGER_ABI`.
+- Client: `apps/backend/src/wave/client.ts` (`WaveClient`). Built in `server.ts` only when
+  all three `ZERO_WAVE_*_ADDRESS` env vars are set; else `waveClient` is `null`.
+- Routers: `apps/backend/src/routers/wave.ts` â€” `/v1/wave/program/:id`,
+  `/v1/wave/program/:id/wave/:waveId`, `/v1/wave/program/:id/meta`,
+  `/v1/wave/program/:id/claimable`, `/v1/wave/issue/:id`,
+  `/v1/wave/buildathon/submission/:id`, plus signer-gated deposit/open-wave/claim/finalize.
+  Returns 503 `WAVE_NOT_CONFIGURED` when addresses are absent. BigInts via `bigintReplacer`.
+- Three wave indexers registered in `server.ts`; skipped when their env addresses are unset.
+
+## 0G Storage Integration
+- `apps/backend/src/storage/service.ts` (`StorageService`) â€” uploads artifacts via
+  `ZeroGStorage` (real 0G when a signer + storage RPC exist), else deterministic in-memory
+  fallback (`InMemoryStorage`, keccak addressable). `backend` is `"0g" | "in-memory"`.
+- Routers: `apps/backend/src/routers/storage.ts` â€” `/v1/storage/upload-json`,
+  `/v1/storage/download/:rootHash`, `/v1/storage/status`.
+
+## DA Publisher (event anchoring)
+- `apps/backend/src/da/publisher.ts` (`DaPublisher`) â€” batches Events from the `EventStore`
+  into content-addressed 0G Storage blobs, producing a merkle-style `batchRoot` over sorted
+  (eventName, payload) leaves. `DaCommitment` exposes both `batchRoot` (commitment) and
+  `rootHash` (blob retrieval key).
+- `events/store.ts` gains `setDaPublisher()`, a DA enqueue hook in `append()`, and
+  `daCommitments()`.
+- Routers: `apps/backend/src/routers/da.ts` â€” `/v1/da/publish`,
+  `/v1/da/commitments`, `/v1/da/summary`.
+- Env: `ZERO_DA_MAX_BATCH_EVENTS` (50), `ZERO_DA_FLUSH_INTERVAL_MS` (5000).
+- Unit tests: `apps/backend/src/da/publisher.test.ts` (StorageService + DaPublisher, in-memory).

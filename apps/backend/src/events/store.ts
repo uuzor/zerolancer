@@ -3,6 +3,7 @@ import { DEFAULT_EVENT_LIMIT, bigintReplacer } from "@zerolance/config";
 import { extractErrorMessage } from "../utils/response.js";
 import type { StoredEventPayload } from "./payloads.js";
 import type { StoredEvent, StoredEventInput, TaskEventQuery } from "./types.js";
+import type { DaCommitment, DaPublisher } from "../da/publisher.js";
 import { broadcast } from "../ws/broadcaster.js";
 import {
   existsSync,
@@ -58,6 +59,8 @@ export class EventStore {
   private total: number;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private persistChain: Promise<void> = Promise.resolve();
+  private daPublisher: DaPublisher | null = null;
+  private readonly daCommitmentsByEvent = new Map<string, DaCommitment>();
 
   constructor(maxEventsPerSource: number = DEFAULT_EVENT_LIMIT) {
     if (!Number.isInteger(maxEventsPerSource) || maxEventsPerSource <= 0) {
@@ -102,6 +105,19 @@ export class EventStore {
       broadcast(stored.eventName, stored);
     } catch {
       /* WS errors are non-fatal */
+    }
+    // Enqueue for DA anchoring (fire-and-forget; failures are re-queued by DaPublisher).
+    if (this.daPublisher) {
+      void this.daPublisher
+        .enqueue(stored)
+        .then((commitment) => {
+          if (commitment) {
+            this.daCommitmentsByEvent.set(dedupeKey(stored), commitment);
+          }
+        })
+        .catch(() => {
+          /* DA is best-effort; event already persisted locally */
+        });
     }
     return stored;
   }
@@ -209,6 +225,16 @@ export class EventStore {
     }
     for (const key of this.buckets.keys()) this.dirty.add(key);
     await this.enqueuePersist();
+  }
+
+  /// Attach a DA publisher so every appended event gets queued for anchoring.
+  setDaPublisher(publisher: DaPublisher): void {
+    this.daPublisher = publisher;
+  }
+
+  /// Commitments produced for DA-anchored batches (keyed by chainId:tx:logIndex).
+  get daCommitments(): ReadonlyMap<string, DaCommitment> {
+    return this.daCommitmentsByEvent;
   }
 }
 

@@ -13,6 +13,9 @@ export function registerHealthRoutes(app: Router, config: ServerConfig): void {
       signer: config.signerAddress ?? null,
       oracle: config.oracleClient ? "configured" : "not-configured",
       escrow: config.escrowClient ? "configured" : "not-configured",
+      wave: config.waveClient ? "configured" : "not-configured",
+      storage: config.storageService.backend,
+      da: config.daPublisher ? "configured" : "not-configured",
       events: getEventStore().size,
     });
   });
