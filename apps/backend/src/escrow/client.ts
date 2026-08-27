@@ -64,11 +64,22 @@ export class EscrowClient {
 
   /// Submit a signed AI verdict to the vault (permissionless relay).
   /// Anyone may call submitVerdict; the on-chain verifier is the trust anchor.
+  /// The ABI declares an unnamed tuple, so we pass a positional array to
+  /// satisfy ethers v6 (named objects require named tuple components).
   async submitVerdict(verdict: Verdict): Promise<Hex> {
     if (!this.signer) throw new Error("submitVerdict requires a signer");
+    const args = [
+      verdict.taskId,
+      verdict.deliverableHash,
+      verdict.passed,
+      verdict.score,
+      verdict.nonce,
+      verdict.validUntil,
+      verdict.signature,
+    ];
     const tx = await (this.escrow.contract as {
-      submitVerdict: (v: Verdict) => Promise<{ wait: () => Promise<unknown> }>;
-    }).submitVerdict(verdict);
+      submitVerdict: (v: unknown[]) => Promise<{ wait: () => Promise<unknown> }>;
+    }).submitVerdict(args);
     await tx.wait();
     return tx as unknown as Hex;
   }

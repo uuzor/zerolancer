@@ -1,4 +1,4 @@
-import { Contract, type ContractRunner } from "ethers";
+import { Contract, type ContractRunner, type InterfaceAbi } from "ethers";
 
 /// Minimal typed-contract wrapper (adapted from axiom-protocol).
 /// `contract` is the ethers Contract typed as the methods generic; `raw` keeps
@@ -9,7 +9,7 @@ export class TypedContract<T> {
 
   constructor(
     address: string,
-    abi: string[] | readonly string[],
+    abi: InterfaceAbi,
     runner: ContractRunner | null,
   ) {
     this.raw = new Contract(address, abi, runner);
