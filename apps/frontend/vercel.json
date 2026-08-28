@@ -1,7 +1,7 @@
 {
   "$schema": "https://vercel.com/vercel-project-config.json",
   "framework": "vite",
-  "buildCommand": "pnpm --filter @zerolance/config build && pnpm --filter @zerolance/frontend build",
+  "buildCommand": "pnpm --filter @zerolance/config build && cd apps/frontend && pnpm build",
   "outputDirectory": "apps/frontend/dist",
   "rewrites": [
     { "source": "/v1/:path*", "destination": "http://localhost:3000/v1/:path*" },
