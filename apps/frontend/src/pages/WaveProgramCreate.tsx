@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useConfig } from "../context/ConfigContext.js";
 import { useAuth } from "../context/AuthContext.js";
-import { ZEROLANCE_WAVE_PROGRAM_ABI } from "../abis.js";
+import { ZEROLANCE_WAVE_PROGRAM_ABI } from "@zerolance/config/abis";
 import { useWriteContract } from "wagmi";
 import { Button, Pill, Empty } from "../components/Alden.js";
 

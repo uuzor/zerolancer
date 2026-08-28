@@ -12,7 +12,11 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "allowImportingTsExtensions": false
+    "allowImportingTsExtensions": false,
+    "baseUrl": ".",
+    "paths": {
+      "@zerolance/config/abis": ["../../packages/config/src/abis/index.ts"]
+    }
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]

@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useConfig } from "../context/ConfigContext.js";
 import { useAuth } from "../context/AuthContext.js";
 import { api } from "../lib/api.js";
-import { ZEROLANCE_REPUTATION_NFT_ABI } from "../abis.js";
+import { ZEROLANCE_REPUTATION_NFT_ABI } from "@zerolance/config/abis";
 import { useReadContract, useWriteContract } from "wagmi";
 import { Button, Pill, Address, Money, Countdown, Empty, LoadingRows, ErrorPane } from "../components/Alden.js";
 
