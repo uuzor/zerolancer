@@ -12,6 +12,7 @@ import compression from "compression";
 import rateLimit from "express-rate-limit";
 import { randomUUID } from "node:crypto";
 import { Wallet } from "ethers";
+import type { InterfaceAbi } from "ethers";
 
 import { HTTP, type AddressName } from "@zerolance/config";
 import {
@@ -19,6 +20,9 @@ import {
   ZEROLANCE_TASK_REGISTRY_ABI,
   ZEROLANCE_ARBITRATION_ABI,
   ZEROLANCE_REPUTATION_NFT_ABI,
+  ZEROLANCE_WAVE_PROGRAM_ABI,
+  ZEROLANCE_WAVE_ISSUE_ABI,
+  ZEROLANCE_WAVE_BUILDATHON_ABI,
 } from "@zerolance/config";
 import {
   createApiKeyAuth,
@@ -39,9 +43,15 @@ import { registerReputationRoutes } from "./routers/reputation.js";
 import { registerEventRoutes } from "./routers/events.js";
 import { registerGithubRoutes } from "./routers/github.js";
 import { registerComputeRoutes } from "./routers/compute.js";
+import { registerWaveRoutes } from "./routers/wave.js";
+import { registerStorageRoutes } from "./routers/storage.js";
+import { registerDaRoutes } from "./routers/da.js";
 import { attachWebsocket } from "./ws/handler.js";
 import { DefaultOracleClient, type OracleClient } from "./oracle/client.js";
 import { EscrowClient } from "./escrow/client.js";
+import { WaveClient } from "./wave/client.js";
+import { StorageService } from "./storage/service.js";
+import { DaPublisher } from "./da/publisher.js";
 import { VerdictOrchestrator } from "./compute/verdict-orchestrator.js";
 import { GithubRunner } from "./github/runner.js";
 import { GithubClient } from "./github/client.js";
@@ -61,6 +71,9 @@ export interface ServerConfig {
   oracleClient: OracleClient | null;
   escrowClient: EscrowClient | null;
   verdictOrchestrator: VerdictOrchestrator | null;
+  waveClient: WaveClient | null;
+  storageService: StorageService;
+  daPublisher: DaPublisher | null;
   indexers: Indexer[];
   signerAddress: `0x${string}` | null;
 }
@@ -94,6 +107,16 @@ export async function createApp(env: BackendEnv): Promise<{
     REPUTATION_NFT_ADDRESS: env.ZERO_REPUTATION_NFT_ADDRESS,
   }) as Partial<Record<AddressName, `0x${string}`>>;
 
+  let signer: Wallet | undefined;
+  const pk = env.ZERO_RUNTIME_SIGNER_PK ?? env.ZERO_OPERATOR_PK;
+  if (pk) {
+    try {
+      signer = new Wallet(pk, provider);
+    } catch (err) {
+      log.warn("invalid runtime signer pk", { error: extractErrorMessage(err) });
+    }
+  }
+
   let oracleClient: OracleClient | null = null;
   if (env.ZERO_ORACLE_URL) {
     oracleClient = new DefaultOracleClient({
@@ -104,15 +127,6 @@ export async function createApp(env: BackendEnv): Promise<{
 
   let escrowClient: EscrowClient | null = null;
   if (addresses.escrowVault && addresses.taskRegistry && addresses.mockUsdc) {
-    let signer: Wallet | undefined;
-    const pk = env.ZERO_RUNTIME_SIGNER_PK ?? env.ZERO_OPERATOR_PK;
-    if (pk) {
-      try {
-        signer = new Wallet(pk, provider);
-      } catch (err) {
-        log.warn("invalid runtime signer pk", { error: extractErrorMessage(err) });
-      }
-    }
     escrowClient = new EscrowClient({
       escrowAddress: addresses.escrowVault,
       taskRegistryAddress: addresses.taskRegistry,
@@ -142,6 +156,37 @@ export async function createApp(env: BackendEnv): Promise<{
     );
   }
 
+  // Wave funding stack (optional until the contracts are deployed).
+  let waveClient: WaveClient | null = null;
+  const waveProgram = env.ZERO_WAVE_PROGRAM_ADDRESS as `0x${string}` | undefined;
+  const waveIssue = env.ZERO_WAVE_ISSUE_ADDRESS as `0x${string}` | undefined;
+  const waveBuildathon = env.ZERO_WAVE_BUILDATHON_ADDRESS as `0x${string}` | undefined;
+  if (waveProgram && waveIssue && waveBuildathon) {
+    waveClient = new WaveClient({
+      waveProgramAddress: waveProgram,
+      waveIssueAddress: waveIssue,
+      waveBuildathonAddress: waveBuildathon,
+      provider,
+      signer,
+    });
+    log.info("WaveClient configured", { waveProgram });
+  }
+
+  // 0G Storage service for artifact blobs (real 0G when signer + storage RPC set).
+  const storageService = new StorageService({
+    storageRpc: env.ZERO_STORAGE_RPC,
+    evmRpc: env.ZERO_EVM_RPC,
+    signerPk: pk,
+  });
+
+  // DA publisher anchors appended events as content-addressed 0G Storage blobs.
+  const daPublisher = new DaPublisher(storageService, {
+    maxBatchEvents: env.ZERO_DA_MAX_BATCH_EVENTS,
+    flushIntervalMs: env.ZERO_DA_FLUSH_INTERVAL_MS,
+  });
+  getEventStore().setDaPublisher(daPublisher);
+  await daPublisher.start();
+
   const indexers: Indexer[] = [];
   {
     const { Contract } = await import("ethers");
@@ -150,7 +195,7 @@ export async function createApp(env: BackendEnv): Promise<{
 
     type IndexerDef = {
       address: `0x${string}` | undefined;
-      abi: readonly string[];
+      abi: InterfaceAbi;
       source: string;
     };
     const defs: IndexerDef[] = [
@@ -173,6 +218,21 @@ export async function createApp(env: BackendEnv): Promise<{
         address: addresses.reputationNft,
         abi: [...ZEROLANCE_REPUTATION_NFT_ABI],
         source: "reputation",
+      },
+      {
+        address: (env.ZERO_WAVE_PROGRAM_ADDRESS as `0x${string}` | undefined),
+        abi: [...ZEROLANCE_WAVE_PROGRAM_ABI],
+        source: "wave-program",
+      },
+      {
+        address: (env.ZERO_WAVE_ISSUE_ADDRESS as `0x${string}` | undefined),
+        abi: [...ZEROLANCE_WAVE_ISSUE_ABI],
+        source: "wave-issue",
+      },
+      {
+        address: (env.ZERO_WAVE_BUILDATHON_ADDRESS as `0x${string}` | undefined),
+        abi: [...ZEROLANCE_WAVE_BUILDATHON_ABI],
+        source: "wave-buildathon",
       },
     ];
     for (const def of defs) {
@@ -202,6 +262,9 @@ export async function createApp(env: BackendEnv): Promise<{
     oracleClient,
     escrowClient,
     verdictOrchestrator,
+    waveClient,
+    storageService,
+    daPublisher,
     indexers,
     signerAddress,
   };
@@ -248,6 +311,9 @@ export async function createApp(env: BackendEnv): Promise<{
   registerEventRoutes(router, config);
   registerGithubRoutes(router, config);
   registerComputeRoutes(router, config);
+  registerWaveRoutes(router, config);
+  registerStorageRoutes(router, config);
+  registerDaRoutes(router, config);
   app.use(router);
 
   app.use("/v1/verification/submit", requireServerAuth);
@@ -284,6 +350,12 @@ export async function createApp(env: BackendEnv): Promise<{
   const shutdown = (sig: string) => {
     log.info(`${sig} received — shutting down`);
     for (const idx of indexers) idx.stop();
+    if (daPublisher) {
+      void daPublisher.flush().catch(() => {
+        /* best-effort final anchor */
+      });
+      daPublisher.stop();
+    }
     server.closeAllConnections?.();
     server.close(() => process.exit(0));
     void getEventStore().flush();

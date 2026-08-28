@@ -26,6 +26,9 @@ export const backendEnvSchema = sharedEnvSchema.merge(
     ZERO_ESCROW_VAULT_ADDRESS: z.string().optional(),
     ZERO_ARBITRATION_ADDRESS: z.string().optional(),
     ZERO_REPUTATION_NFT_ADDRESS: z.string().optional(),
+    ZERO_WAVE_PROGRAM_ADDRESS: z.string().optional(),
+    ZERO_WAVE_ISSUE_ADDRESS: z.string().optional(),
+    ZERO_WAVE_BUILDATHON_ADDRESS: z.string().optional(),
     ZERO_GITHUB_TOKEN: z.string().optional(),
     ZERO_GITHUB_OAUTH_CLIENT_ID: z.string().optional(),
     ZERO_GITHUB_OAUTH_CLIENT_SECRET: z.string().optional(),
@@ -33,6 +36,8 @@ export const backendEnvSchema = sharedEnvSchema.merge(
     ZERO_GITHUB_WEBHOOK_SECRET: z.string().optional(),
     ZERO_SANDBOX_IMAGE: z.string().default("node:22-alpine"),
     ZERO_VERIFICATION_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+    ZERO_DA_MAX_BATCH_EVENTS: z.coerce.number().int().positive().default(50),
+    ZERO_DA_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
   }),
 );
 export type BackendEnv = z.infer<typeof backendEnvSchema>;
