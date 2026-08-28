@@ -13,8 +13,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@zerolance/config": "workspace:*",
     "@rainbow-me/rainbowkit": "^2.1.6",
+    "@tanstack/react-query": "^5.102.8",
+    "@zerolance/config": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",
