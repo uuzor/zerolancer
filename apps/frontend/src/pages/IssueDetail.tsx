@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useConfig } from "../context/ConfigContext.js";
 import { useAuth } from "../context/AuthContext.js";
 import { api } from "../lib/api.js";
-import { ZEROLANCE_WAVE_ISSUE_ABI } from "@zerolance/config/abis";
+import { ZEROLANCE_WAVE_ISSUE_ABI } from "../abis.js";
 import { useReadContract, useWriteContract } from "wagmi";
 import { Button, Pill, Address, Empty, LoadingRows, ErrorPane } from "../components/Alden.js";
 import type { IssueState } from "../lib/types.js";
