@@ -10,9 +10,16 @@ export interface Config {
 
 export const ConfigContext = createContext<Config | null>(null);
 
-export function useConfig() {
+export function useConfig(): Config {
   const ctx = useContext(ConfigContext);
-  if (!ctx) throw new Error("useConfig must be used within ConfigProvider");
+  if (!ctx) {
+    return {
+      chainId: 0,
+      rpcUrl: "",
+      addresses: {},
+      routes: [],
+    };
+  }
   return ctx;
 }
 
@@ -28,8 +35,23 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
-  if (error) return <div className="zl-container" style={{ padding: "40px 32px" }}><p style={{ color: "red" }}>Failed to load config: {error}</p></div>;
-  if (!config) return <div className="zl-container" style={{ padding: "40px 32px" }}><p>Loading…</p></div>;
+  if (error) {
+    return (
+      <div className="zl-container" style={{ padding: "40px 32px" }}>
+        <p style={{ color: "red" }}>Failed to load config: {error}</p>
+      </div>
+    );
+  }
 
-  return <ConfigContext.Provider value={config}>{children}</ConfigContext.Provider>;
+  return (
+    <ConfigContext.Provider value={config}>
+      {!config ? (
+        <div className="zl-container" style={{ padding: "40px 32px" }}>
+          <p>Loading…</p>
+        </div>
+      ) : (
+        children
+      )}
+    </ConfigContext.Provider>
+  );
 }

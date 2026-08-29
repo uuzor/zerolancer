@@ -1,0 +1,18 @@
+{
+  "$schema": "https://vercel.com/vercel-project-config.json",
+  "framework": "vite",
+  "buildCommand": "pnpm --filter @zerolance/config build && pnpm build",
+  "outputDirectory": "dist",
+  "experimentalServices": {
+    "backend": {
+      "root": "apps/backend",
+      "mountPath": "/api/backend",
+      "buildCommand": "pnpm --filter @zerolance/config build && pnpm --filter @zerolance/shared build && pnpm --filter @zerolance/backend build"
+    },
+    "oracle": {
+      "root": "apps/oracle",
+      "mountPath": "/api/oracle",
+      "buildCommand": "pnpm --filter @zerolance/config build && pnpm --filter @zerolance/oracle build"
+    }
+  }
+}

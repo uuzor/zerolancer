@@ -7,7 +7,7 @@ import { defineChain } from "viem";
 import { AuthProvider } from "./context/AuthContext.js";
 import { ConfigProvider } from "./context/ConfigContext.js";
 import { AppShell } from "./AppShell.js";
-import { routes } from "./routes.js";
+import { AppRoutes } from "./routes.js";
 import "./styles.css";
 
 const queryClient = new QueryClient();
@@ -35,7 +35,7 @@ function App() {
           <BrowserRouter>
             <ConfigProvider>
               <AuthProvider>
-                <AppShell>{routes()}</AppShell>
+                <AppShell><AppRoutes /></AppShell>
               </AuthProvider>
             </ConfigProvider>
           </BrowserRouter>
