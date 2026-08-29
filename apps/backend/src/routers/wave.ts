@@ -201,4 +201,95 @@ export function registerWaveRoutes(app: Router, config: ServerConfig): void {
     const tx = await wave.finalizeWave(programId, parsed.waveId);
     return { txHash: tx };
   }, config);
+
+  createRoute(app, {
+    path: "/v1/wave/program",
+    method: "post",
+    consumer: "wave.createProgram",
+    description: "Create a new wave program (signer)",
+  }, async (parsed, _req, res) => {
+    const wave = clientOf(config, res);
+    if (!wave) return null;
+    const body = parsed as {
+      token: string;
+      genesisPool: string;
+      numWaves: string;
+      buildWindow: string;
+      evalWindow: string;
+      complimentWindow: string;
+      budgetMethod: string;
+      feeBps: string;
+      treasury: string;
+      specHash: string;
+    };
+    const tx = await wave.createWaveProgram(
+      body.token as `0x${string}`,
+      BigInt(body.genesisPool),
+      BigInt(body.numWaves),
+      BigInt(body.buildWindow),
+      BigInt(body.evalWindow),
+      BigInt(body.complimentWindow),
+      Number(body.budgetMethod),
+      Number(body.feeBps),
+      body.treasury as `0x${string}`,
+      body.specHash as `0x${string}`,
+    );
+    return { txHash: tx };
+  }, config);
+
+  createRoute(app, {
+    path: "/v1/wave/program/:id/awarder",
+    method: "post",
+    consumer: "wave.grantAwarder",
+    description: "Grant or revoke awarder role (signer)",
+  }, async (parsed, _req, res) => {
+    const wave = clientOf(config, res);
+    if (!wave) return null;
+    const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
+    const body = parsed as { awarder: string; allowed: boolean };
+    const tx = await wave.grantAwarder(programId, body.awarder as `0x${string}`, body.allowed);
+    return { txHash: tx };
+  }, config);
+
+  createRoute(app, {
+    path: "/v1/wave/program/:id/close-wave",
+    method: "post",
+    consumer: "wave.closeWave",
+    description: "Close a wave (signer)",
+  }, async (parsed, _req, res) => {
+    const wave = clientOf(config, res);
+    if (!wave) return null;
+    const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
+    const waveId = BigInt(parseInt((parsed as any).waveId ?? "0", 10));
+    const tx = await wave.closeWave(programId, waveId);
+    return { txHash: tx };
+  }, config);
+
+  createRoute(app, {
+    path: "/v1/wave/program/:id/open-evaluation",
+    method: "post",
+    consumer: "wave.openEvaluation",
+    description: "Open evaluation phase for a wave (signer)",
+  }, async (parsed, _req, res) => {
+    const wave = clientOf(config, res);
+    if (!wave) return null;
+    const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
+    const waveId = BigInt(parseInt((parsed as any).waveId ?? "0", 10));
+    const tx = await wave.openEvaluation(programId, waveId);
+    return { txHash: tx };
+  }, config);
+
+  createRoute(app, {
+    path: "/v1/wave/program/:id/close-evaluation",
+    method: "post",
+    consumer: "wave.closeEvaluation",
+    description: "Close evaluation phase for a wave (signer)",
+  }, async (parsed, _req, res) => {
+    const wave = clientOf(config, res);
+    if (!wave) return null;
+    const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
+    const waveId = BigInt(parseInt((parsed as any).waveId ?? "0", 10));
+    const tx = await wave.closeEvaluation(programId, waveId);
+    return { txHash: tx };
+  }, config);
 }

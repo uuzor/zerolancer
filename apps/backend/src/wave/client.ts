@@ -157,6 +157,34 @@ export class WaveClient {
   async claim(programId: bigint, waveId: bigint): Promise<Hex> {
     return this.send(this.program, "claim", [programId, waveId]);
   }
+  async createWaveProgram(
+    token: `0x${string}`,
+    genesisPool: bigint,
+    numWaves: bigint,
+    buildWindow: bigint,
+    evalWindow: bigint,
+    complimentWindow: bigint,
+    budgetMethod: number,
+    feeBps: number,
+    treasury: `0x${string}`,
+    specHash: `0x${string}`,
+  ): Promise<Hex> {
+    return this.send(this.program, "createWaveProgram", [
+      token,
+      genesisPool,
+      numWaves,
+      buildWindow,
+      evalWindow,
+      complimentWindow,
+      budgetMethod,
+      feeBps,
+      treasury,
+      specHash,
+    ]);
+  }
+  async grantAwarder(programId: bigint, awarder: `0x${string}`, allowed: boolean): Promise<Hex> {
+    return this.send(this.program, "grantAwarder", [programId, awarder, allowed]);
+  }
 
   // ── Write: Wave Issue ────────────────────────────────────────────────────
   async acceptRepo(programId: bigint, repoHash: `0x${string}`, allowed: boolean): Promise<Hex> {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useConfig } from "../context/ConfigContext.js";
+import { useAuthenticatedApi } from "../hooks/useAuthenticatedApi.js";
 import { api } from "../lib/api.js";
 import { Button, Pill, Address, Money, Countdown, Empty, LoadingRows, ErrorPane } from "../components/Alden.js";
 
@@ -21,6 +22,9 @@ export interface ProgramMeta {
   currentWave: string;
   waveSeq: string;
   initialized: boolean;
+  remainingPool?: string;
+  waveBudget?: string;
+  totalPoints?: string;
 }
 
 export interface WaveInfo {
@@ -37,6 +41,7 @@ export interface WaveInfo {
 export default function ProgramDetail() {
   const { programId } = useParams();
   const config = useConfig();
+  const { authApi } = useAuthenticatedApi();
   const [tab, setTab] = useState<Tab>("overview");
   const [meta, setMeta] = useState<ProgramMeta | null>(null);
   const [waves, setWaves] = useState<WaveInfo[]>([]);
@@ -44,6 +49,8 @@ export default function ProgramDetail() {
   const [error, setError] = useState<string | null>(null);
   const [depositing, setDepositing] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const programAddress = config.addresses.waveProgram;
 
@@ -106,6 +113,24 @@ export default function ProgramDetail() {
     }
   };
 
+  const handleWaveAction = async (action: string, waveId: number, body?: Record<string, any>) => {
+    if (!programId) return;
+    setActionLoading(`${action}-${waveId}`);
+    setActionError(null);
+    try {
+      await authApi(`/v1/wave/program/${programId}/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ waveId, ...body }),
+      });
+      window.location.reload();
+    } catch (e: any) {
+      setActionError(e.message ?? `${action} failed`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   if (!programAddress) {
     return (
       <div className="zl-container" style={{ padding: "80px 32px" }}>
@@ -141,6 +166,8 @@ export default function ProgramDetail() {
           ))}
         </div>
 
+        {actionError && <div className="zl-card" style={{ marginBottom: 24, borderColor: "#f5d5d5", background: "#fff5f5" }}><p style={{ color: "#5c2a2a", margin: 0 }}>{actionError}</p></div>}
+
         {tab === "overview" && (
           <div className="zl-card">
             <div className="zl-grid zl-grid--2">
@@ -154,6 +181,15 @@ export default function ProgramDetail() {
               <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Eval Window</span><div style={{ marginTop: 4 }}>{meta.evalWindow}s</div></div>
               <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Compliment Window</span><div style={{ marginTop: 4 }}>{meta.complimentWindow}s</div></div>
               <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Current Wave</span><div style={{ marginTop: 4 }}>#{meta.currentWave}</div></div>
+              {meta.remainingPool !== undefined && (
+                <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Remaining Pool</span><div style={{ marginTop: 4 }}><Money value={meta.remainingPool} token="USDC" /></div></div>
+              )}
+              {meta.waveBudget !== undefined && (
+                <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Wave Budget</span><div style={{ marginTop: 4 }}><Money value={meta.waveBudget} token="USDC" /></div></div>
+              )}
+              {meta.totalPoints !== undefined && (
+                <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Total Points</span><div style={{ marginTop: 4 }}>{meta.totalPoints}</div></div>
+              )}
             </div>
           </div>
         )}
@@ -164,17 +200,29 @@ export default function ProgramDetail() {
               <Empty title="No waves yet" description="Waves will appear here once opened." />
             ) : (
               waves.map((w, i) => (
-                <div key={i} className="zl-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
+                <div key={i} className="zl-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
+                  <div style={{ flex: "1 1 240px" }}>
                     <div style={{ fontWeight: 600 }}>Wave #{i}</div>
                     <div style={{ fontSize: 14, color: "var(--color-graphite)" }}>
                       Budget: <Money value={w.budget} token="USDC" /> · Distributed: <Money value={w.totalDistributed} token="USDC" />
                     </div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <Pill variant={w.status === "Open" ? "success" : w.status === "Evaluation" ? "warning" : "default"}>{w.status}</Pill>
                     <div style={{ fontSize: 12, color: "var(--color-graphite)", marginTop: 4 }}>
                       {Number(w.buildEndAt) > 0 && <Countdown to={Number(w.buildEndAt) * 1000} label="Build ends" />}
+                      {Number(w.evalEndAt) > 0 && <span> · </span>}
+                      {Number(w.evalEndAt) > 0 && <Countdown to={Number(w.evalEndAt) * 1000} label="Eval ends" />}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+                    <Pill variant={w.status === "Open" ? "success" : w.status === "Evaluation" ? "warning" : "default"}>{w.status}</Pill>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      <Button size="sm" variant="ghost" disabled={!!actionLoading} onClick={() => handleWaveAction("open-wave", i)}>Open Wave</Button>
+                      <Button size="sm" variant="ghost" disabled={!!actionLoading} onClick={() => handleWaveAction("close-wave", i)}>Close Wave</Button>
+                      <Button size="sm" variant="ghost" disabled={!!actionLoading} onClick={() => handleWaveAction("open-evaluation", i)}>Open Eval</Button>
+                      <Button size="sm" variant="ghost" disabled={!!actionLoading} onClick={() => handleWaveAction("close-evaluation", i)}>Close Eval</Button>
+                      <Button size="sm" variant="ghost" disabled={!!actionLoading} onClick={() => handleWaveAction("finalize", i)}>Finalize</Button>
+                      {Number(meta.currentWave) === i && !w.finalized && (
+                        <Button size="sm" disabled={!!actionLoading} onClick={() => handleWaveAction("claim", i)}>Claim</Button>
+                      )}
                     </div>
                   </div>
                 </div>

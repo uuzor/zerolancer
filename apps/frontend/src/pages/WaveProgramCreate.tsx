@@ -2,8 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useConfig } from "../context/ConfigContext.js";
 import { useAuth } from "../context/AuthContext.js";
-import { ZEROLANCE_WAVE_PROGRAM_ABI } from "@zerolance/config/abis";
-import { useWriteContract } from "wagmi";
+import { useAuthenticatedApi } from "../hooks/useAuthenticatedApi.js";
 import { Button, Pill, Empty } from "../components/Alden.js";
 
 const BUDGET_METHODS = ["FixedPerWave", "PctOfRemaining"] as const;
@@ -12,7 +11,7 @@ export default function WaveProgramCreate() {
   const navigate = useNavigate();
   const config = useConfig();
   const { connected } = useAuth();
-  const { writeContract, isPending } = useWriteContract();
+  const { authApi } = useAuthenticatedApi();
   const programAddress = config.addresses.waveProgram;
 
   const [token, setToken] = useState(config.addresses.mockUsdc ?? "");
@@ -25,6 +24,7 @@ export default function WaveProgramCreate() {
   const [feeBps, setFeeBps] = useState("250");
   const [treasury, setTreasury] = useState("");
   const [specHash, setSpecHash] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!programAddress) {
@@ -37,28 +37,34 @@ export default function WaveProgramCreate() {
 
   const handleSubmit = async () => {
     setError(null);
+    setSubmitting(true);
     try {
       const methodIndex = BUDGET_METHODS.indexOf(budgetMethod);
-      writeContract({
-        address: programAddress as `0x${string}`,
-        abi: ZEROLANCE_WAVE_PROGRAM_ABI,
-        functionName: "createWaveProgram",
-        args: [
-          token as `0x${string}`,
-          BigInt(genesisPool),
-          BigInt(numWaves),
-          BigInt(buildWindow),
-          BigInt(evalWindow),
-          BigInt(complimentWindow),
-          methodIndex,
-          Number(feeBps),
-          treasury as `0x${string}`,
-          specHash as `0x${string}`,
-        ],
+      const res = await authApi<{ txHash: string; programId?: string }>("/v1/wave/program", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          genesisPool,
+          numWaves,
+          buildWindow,
+          evalWindow,
+          complimentWindow,
+          budgetMethod: methodIndex,
+          feeBps: Number(feeBps),
+          treasury,
+          specHash,
+        }),
       });
-      navigate("/programs");
+      if (res.programId) {
+        navigate(`/programs/${res.programId}`);
+      } else {
+        navigate("/programs");
+      }
     } catch (e: any) {
       setError(e.message ?? "Transaction failed");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -119,12 +125,12 @@ export default function WaveProgramCreate() {
               <input className="zl-input" value={specHash} onChange={(e) => setSpecHash(e.target.value)} placeholder="0x..." />
             </div>
             <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
-              <Button onClick={handleSubmit} disabled={isPending || !connected}>
-                {isPending ? "Signing..." : "Create Program"}
+              <Button onClick={handleSubmit} disabled={submitting || !connected}>
+                {submitting ? "Submitting..." : "Create Program"}
               </Button>
               {!connected && <Pill variant="warning">Connect wallet</Pill>}
             </div>
-            {isPending && <p style={{ fontSize: 14, color: "var(--color-graphite)" }}>Sign transaction in wallet to deploy program.</p>}
+            {submitting && <p style={{ fontSize: 14, color: "var(--color-graphite)" }}>Sign transaction in wallet to deploy program.</p>}
           </div>
         </div>
       </div>
