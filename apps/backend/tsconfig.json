@@ -3,15 +3,23 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "lib": ["ES2022", "ES2024"],
     "esModuleInterop": true,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "types": ["node"],
-    "incremental": true
+    "composite": true,
+    "incremental": true,
+    "baseUrl": ".",
+    "paths": {
+      "@zerolance/shared": ["../../packages/shared/dist/index.d.ts"],
+      "@zerolance/shared/*": ["../../packages/shared/dist/*"],
+      "@zerolance/config": ["../../packages/config/dist/index.d.ts"],
+      "@zerolance/config/*": ["../../packages/config/dist/*"]
+    }
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]

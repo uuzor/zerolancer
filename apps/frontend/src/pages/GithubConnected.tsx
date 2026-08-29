@@ -8,12 +8,13 @@ export default function GithubConnected() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const login = params.get("login");
+  const token = params.get("token");
 
   useEffect(() => {
     if (login) {
-      setGithub({ login, token: "placeholder", avatarUrl: "" });
+      setGithub({ login, token: token ?? "", avatarUrl: "" });
     }
-  }, [login, setGithub]);
+  }, [login, token, setGithub]);
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "var(--spacing-32)" }}>

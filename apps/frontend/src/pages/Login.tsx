@@ -14,9 +14,10 @@ export default function Login() {
 
   useEffect(() => {
     const login = params.get("login");
+    const token = params.get("token");
     if (login) {
       setLoginParam(login);
-      setGithub({ login, token: "placeholder", avatarUrl: "" });
+      setGithub({ login, token: token ?? "", avatarUrl: "" });
     }
   }, [params, setGithub]);
 

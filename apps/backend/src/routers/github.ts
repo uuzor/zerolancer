@@ -143,7 +143,7 @@ export function registerGithubRoutes(app: Router, config: ServerConfig): void {
       });
       const frontend = config.env.ZERO_FRONTEND_URL ?? "http://localhost:5173";
       const target = consumed.redirect ?? `${frontend}/github/connected`;
-      res.redirect(`${target}?login=${encodeURIComponent(user.login)}`);
+      res.redirect(`${target}?login=${encodeURIComponent(user.login)}&token=${encodeURIComponent(tokenResult.accessToken)}`);
       log.info("github account linked", { login: user.login });
       return null;
     } catch (err) {

@@ -7,13 +7,15 @@
   "license": "MIT",
   "main": "dist/index.js",
   "scripts": {
+    "prebuild": "cd ../.. && pnpm --filter @zerolance/config build && pnpm --filter @zerolance/shared build",
     "build": "tsc --project tsconfig.json",
     "start": "node dist/index.js",
     "prestart": "pnpm build",
     "dev": "node --import tsx src/index.ts",
     "test": "node --import tsx --test $(find src test -name '*.test.ts' 2>/dev/null | sort)",
     "lint": "eslint src",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node -e \"const fs=require('fs');const path=require('path');const root=path.resolve(__dirname,'..','..','packages');['config','shared'].forEach(p=>{const target=path.join(root,p);const link=path.join(__dirname,'node_modules','@zerolance',p);if(fs.existsSync(link))fs.unlinkSync(link);fs.symlinkSync(target,link,'junction')})\""
   },
   "dependencies": {
     "@zerolance/config": "workspace:*",
