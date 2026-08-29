@@ -24,6 +24,15 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: true,
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-wagmi": ["wagmi", "@rainbow-me/rainbowkit", "viem"],
+          "vendor-react": ["react", "react-dom", "react-router-dom"],
+        },
+      },
+    },
   },
   define: {
     "process.env.ZERO_API_URL": JSON.stringify(
