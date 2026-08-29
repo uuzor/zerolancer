@@ -2,9 +2,5 @@
   "$schema": "https://vercel.com/vercel-project-config.json",
   "framework": "vite",
   "buildCommand": "pnpm --filter @zerolance/config build && pnpm build",
-  "outputDirectory": "dist",
-  "rewrites": [
-    { "source": "/v1/:path*", "destination": "http://localhost:3000/v1/:path*" },
-    { "source": "/health", "destination": "http://localhost:3000/health" }
-  ]
+  "outputDirectory": "dist"
 }

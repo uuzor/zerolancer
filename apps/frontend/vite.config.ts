@@ -35,8 +35,8 @@ export default defineConfig({
     },
   },
   define: {
-    "process.env.ZERO_API_URL": JSON.stringify(
-      process.env.ZERO_API_URL ?? "http://localhost:3000",
+    "import.meta.env.VITE_API_URL": JSON.stringify(
+      process.env.VITE_API_URL ?? "http://localhost:3000",
     ),
   },
 });
