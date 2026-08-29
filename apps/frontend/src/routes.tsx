@@ -29,7 +29,7 @@ import Github from "./pages/Github.js";
 import Settings from "./pages/Settings.js";
 import MyTasks from "./pages/MyTasks.js";
 
-export function routes() {
+export function AppRoutes() {
   const { connected } = useAuth();
   const config = useConfig();
   const hasWave = config.addresses.waveProgram && config.addresses.waveIssue && config.addresses.waveBuildathon;
