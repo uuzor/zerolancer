@@ -26,6 +26,7 @@ import ReputationDetail from "./pages/ReputationDetail.js";
 import Disputes from "./pages/Disputes.js";
 import DisputeDetail from "./pages/DisputeDetail.js";
 import Github from "./pages/Github.js";
+import GithubConnected from "./pages/GithubConnected.js";
 import Settings from "./pages/Settings.js";
 import MyTasks from "./pages/MyTasks.js";
 
@@ -65,6 +66,7 @@ export function AppRoutes() {
       <Route path="/disputes" element={<Disputes />} />
       <Route path="/disputes/:taskId" element={<DisputeDetail />} />
       <Route path="/github" element={<Github />} />
+      <Route path="/github/connected" element={<GithubConnected />} />
       <Route path="/settings" element={<Settings />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>

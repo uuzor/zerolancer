@@ -3,19 +3,18 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.js";
-import { Button, Pill, Empty } from "../components/Alden.js";
+import { Button, Pill } from "../components/Alden.js";
 
 export default function Login() {
   const { isConnected } = useAccount();
-  const { github, setGithub, principal, devMode } = useAuth();
+  const { setGithub, principal, devMode } = useAuth();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const [loginParam, setLoginParam] = useState<string | null>(null);
 
   useEffect(() => {
     const login = params.get("login");
-    const connectedParam = params.get("connected");
-    if (login && connectedParam) {
+    if (login) {
       setLoginParam(login);
       setGithub({ login, token: "placeholder", avatarUrl: "" });
     }
@@ -24,6 +23,11 @@ export default function Login() {
   useEffect(() => {
     if (isConnected) navigate("/marketplace", { replace: true });
   }, [isConnected, navigate]);
+
+  const handleGithubConnect = () => {
+    const redirect = "/login";
+    window.location.href = `/v1/github/auth/start?redirect=${encodeURIComponent(redirect)}`;
+  };
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "var(--spacing-32)" }}>
@@ -57,10 +61,7 @@ export default function Login() {
           <div style={{ display: "flex", justifyContent: "center" }}>
             <ConnectButton />
           </div>
-          <Button
-            variant="ghost"
-            onClick={() => { window.location.href = `/v1/github/auth/start?redirect=${encodeURIComponent("/login")}`; }}
-          >
+          <Button variant="ghost" onClick={handleGithubConnect}>
             Connect GitHub
           </Button>
         </div>

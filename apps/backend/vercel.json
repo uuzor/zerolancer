@@ -1,0 +1,4 @@
+{
+  "$schema": "https://vercel.com/vercel-project-config.json",
+  "buildCommand": "cd ../.. && pnpm --filter @zerolance/config build && pnpm --filter @zerolance/shared build && cd apps/backend && pnpm build"
+}
