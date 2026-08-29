@@ -5,7 +5,7 @@ import { useAuthenticatedApi } from "../hooks/useAuthenticatedApi.js";
 import { api } from "../lib/api.js";
 import { Button, Pill, Address, Money, Countdown, Empty, LoadingRows, ErrorPane } from "../components/Alden.js";
 
-type Tab = "overview" | "waves" | "awarders" | "pool";
+type Tab = "overview" | "waves" | "projects" | "builders" | "awarders" | "pool";
 
 export interface ProgramMeta {
   programId: string;
@@ -38,6 +38,31 @@ export interface WaveInfo {
   finalized: boolean;
 }
 
+export interface ProjectInfo {
+  id: string;
+  programId: string;
+  waveId: string;
+  builder: string;
+  team: string;
+  repoUrl: string;
+  repoHash: string;
+  contentHash: string;
+  description: string;
+  status: string;
+  pointsAwarded: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BuilderInfo {
+  address: string;
+  programId: string;
+  name: string;
+  bio: string;
+  repoUrl: string;
+  appliedAt: string;
+}
+
 export default function ProgramDetail() {
   const { programId } = useParams();
   const config = useConfig();
@@ -45,6 +70,8 @@ export default function ProgramDetail() {
   const [tab, setTab] = useState<Tab>("overview");
   const [meta, setMeta] = useState<ProgramMeta | null>(null);
   const [waves, setWaves] = useState<WaveInfo[]>([]);
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [builders, setBuilders] = useState<BuilderInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [depositing, setDepositing] = useState(false);
@@ -62,10 +89,14 @@ export default function ProgramDetail() {
     Promise.all([
       api<{ program: ProgramMeta }>(`/v1/wave/program/${programId}`),
       api<{ remainingPool: string; waveBudget: string; totalPoints: string }>(`/v1/wave/program/${programId}/meta`),
+      api<{ builders: BuilderInfo[] }>(`/v1/wave/program/${programId}/builders`),
+      api<{ projects: ProjectInfo[] }>(`/v1/wave/program/${programId}/projects`),
     ])
-      .then(([progRes, metaRes]) => {
+      .then(([progRes, metaRes, buildersRes, projectsRes]) => {
         if (cancelled) return;
         setMeta({ ...progRes.program, ...metaRes } as ProgramMeta);
+        setBuilders(buildersRes.builders ?? []);
+        setProjects(projectsRes.projects ?? []);
         const current = Number(progRes.program.currentWave ?? 0);
         const wavePromises: Promise<WaveInfo>[] = [];
         for (let i = 0; i <= current; i++) {
@@ -146,6 +177,8 @@ export default function ProgramDetail() {
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "waves", label: "Waves" },
+    { key: "projects", label: "Projects" },
+    { key: "builders", label: "Builders" },
     { key: "awarders", label: "Awarders" },
     { key: "pool", label: "Pool" },
   ];
@@ -220,13 +253,67 @@ export default function ProgramDetail() {
                       <Button size="sm" variant="ghost" disabled={!!actionLoading} onClick={() => handleWaveAction("open-evaluation", i)}>Open Eval</Button>
                       <Button size="sm" variant="ghost" disabled={!!actionLoading} onClick={() => handleWaveAction("close-evaluation", i)}>Close Eval</Button>
                       <Button size="sm" variant="ghost" disabled={!!actionLoading} onClick={() => handleWaveAction("finalize", i)}>Finalize</Button>
-                      {Number(meta.currentWave) === i && !w.finalized && (
+                      {Number(meta?.currentWave) === i && !w.finalized && (
                         <Button size="sm" disabled={!!actionLoading} onClick={() => handleWaveAction("claim", i)}>Claim</Button>
                       )}
                     </div>
                   </div>
                 </div>
               ))
+            )}
+          </div>
+        )}
+
+        {tab === "projects" && (
+          <div className="zl-card">
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>Projects</h3>
+              <Link to={`/programs/${programId}/projects`}><Button size="sm">View All Projects</Button></Link>
+            </div>
+            {projects.length === 0 ? (
+              <Empty title="No projects yet" description="Projects will appear here once builders submit." />
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {projects.slice(0, 10).map((p) => (
+                  <div key={p.id} className="zl-card" style={{ padding: 16, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                    <div style={{ flex: "1 1 240px" }}>
+                      <div style={{ fontWeight: 600 }}>Wave #{p.waveId} · {p.status}</div>
+                      <div style={{ fontSize: 13, color: "var(--color-graphite)", marginTop: 4 }}>
+                        <Address value={p.builder} /> · {p.team ? `Team: ${p.team}` : "Solo"}
+                      </div>
+                      {p.description ? <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--color-graphite)" }}>{p.description}</p> : null}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <a href={p.repoUrl} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>Repo ↗</a>
+                      <Link to={`/project/${p.id}`}><Button size="sm">View</Button></Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "builders" && (
+          <div className="zl-card">
+            <h3 style={{ marginTop: 0 }}>Builders</h3>
+            {builders.length === 0 ? (
+              <Empty title="No builders yet" description="Builders will appear here once they register." />
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {builders.map((b) => (
+                  <div key={`${b.address}-${b.programId}`} className="zl-card" style={{ padding: 16, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{b.name || "Anonymous Builder"}</div>
+                      <div style={{ fontSize: 13, color: "var(--color-graphite)", marginTop: 4 }}>
+                        <Address value={b.address} />
+                      </div>
+                      {b.bio ? <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--color-graphite)" }}>{b.bio}</p> : null}
+                    </div>
+                    {b.repoUrl ? <a href={b.repoUrl} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>Repo ↗</a> : null}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         )}

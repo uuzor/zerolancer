@@ -12,7 +12,7 @@ import { broadcast } from "../ws/broadcaster.js";
 import { sendError } from "../utils/response.js";
 
 export interface RouteRegistration {
-  method: "GET" | "POST" | "DELETE" | "PUT";
+  method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   path: string;
   consumer?: string;
   description?: string;
@@ -31,7 +31,7 @@ export type RouteHandler<T> = (
 
 export interface RouteOptions<S extends z.ZodTypeAny | undefined = undefined> {
   path: string;
-  method?: "get" | "post";
+  method?: "get" | "post" | "patch" | "put" | "delete";
   schema?: S;
   requireId?: boolean;
   requireAddress?: AddressKey;
@@ -49,9 +49,18 @@ export function createRoute<S extends z.ZodTypeAny | undefined = undefined>(
   config: ServerConfig,
 ): void {
   const method = opts.method ?? "post";
-  const routeFn = method === "get" ? app.get.bind(app) : app.post.bind(app);
+  const routeFn =
+    method === "get"
+      ? app.get.bind(app)
+      : method === "patch"
+        ? app.patch.bind(app)
+        : method === "put"
+          ? app.put.bind(app)
+          : method === "delete"
+            ? app.delete.bind(app)
+            : app.post.bind(app);
   REGISTERED_ROUTES.push({
-    method: method.toUpperCase() as "GET" | "POST",
+    method: method.toUpperCase() as "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
     path: opts.path,
     consumer: opts.consumer,
     description: opts.description,

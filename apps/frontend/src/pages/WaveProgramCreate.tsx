@@ -24,6 +24,7 @@ export default function WaveProgramCreate() {
   const [feeBps, setFeeBps] = useState("250");
   const [treasury, setTreasury] = useState("");
   const [specHash, setSpecHash] = useState("");
+  const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,10 +55,12 @@ export default function WaveProgramCreate() {
           feeBps: Number(feeBps),
           treasury,
           specHash,
+          description,
         }),
       });
-      if (res.programId) {
-        navigate(`/programs/${res.programId}`);
+      const programId = res.programId;
+      if (programId) {
+        navigate(`/programs/${programId}`);
       } else {
         navigate("/programs");
       }
@@ -123,6 +126,10 @@ export default function WaveProgramCreate() {
             <div>
               <label className="zl-label">Spec Hash (bytes32)</label>
               <input className="zl-input" value={specHash} onChange={(e) => setSpecHash(e.target.value)} placeholder="0x..." />
+            </div>
+            <div>
+              <label className="zl-label">Description</label>
+              <textarea className="zl-textarea" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Describe your wave program..." rows={4} />
             </div>
             <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
               <Button onClick={handleSubmit} disabled={submitting || !connected}>

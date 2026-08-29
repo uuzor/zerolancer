@@ -1,4 +1,4 @@
-import { Contract, Wallet, type JsonRpcProvider } from "ethers";
+import { Contract, Wallet, type JsonRpcProvider, Interface } from "ethers";
 import type { Hex } from "viem";
 import {
   ERC20_ABI,
@@ -8,6 +8,7 @@ import {
   ZEROLANCE_WAVE_BUILDATHON_ABI,
 } from "@zerolance/config";
 import { TypedContract } from "@zerolance/config/types/contract";
+import { waveStore } from "./store.js";
 
 export interface WaveClientConfig {
   waveProgramAddress: `0x${string}`;
@@ -130,9 +131,17 @@ export class WaveClient {
   private async send(contract: TypedContract<unknown>, method: string, args: unknown[]): Promise<Hex> {
     this.requireSigner();
     const fn = (contract.raw as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>)[method]!;
-    const tx = (await fn(...args)) as { wait: () => Promise<unknown> };
+    const tx = (await fn!(...args)) as { wait: () => Promise<any> };
     await tx.wait();
     return tx as unknown as Hex;
+  }
+
+  private async sendWithReceipt(contract: TypedContract<unknown>, method: string, args: unknown[]): Promise<{ txHash: Hex; receipt: any }> {
+    this.requireSigner();
+    const fn = (contract.raw as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>)[method]!;
+    const tx = (await fn!(...args)) as { wait: () => Promise<any> };
+    const receipt = await tx.wait();
+    return { txHash: tx as unknown as Hex, receipt };
   }
 
   // ── Write: program lifecycle ─────────────────────────────────────────────
@@ -168,8 +177,8 @@ export class WaveClient {
     feeBps: number,
     treasury: `0x${string}`,
     specHash: `0x${string}`,
-  ): Promise<Hex> {
-    return this.send(this.program, "createWaveProgram", [
+  ): Promise<{ txHash: Hex; programId: bigint }> {
+    const { txHash, receipt } = await this.sendWithReceipt(this.program, "createWaveProgram", [
       token,
       genesisPool,
       numWaves,
@@ -181,6 +190,19 @@ export class WaveClient {
       treasury,
       specHash,
     ]);
+    const iface = new Interface([...ZEROLANCE_WAVE_PROGRAM_ABI]);
+    let programId = BigInt(0);
+    for (const log of receipt.logs) {
+      try {
+        const parsed = iface.parseLog({ topics: log.topics, data: log.data });
+        if (parsed?.name === "ProgramCreated") {
+          programId = parsed.args.programId;
+          break;
+        }
+      } catch {
+      }
+    }
+    return { txHash, programId };
   }
   async grantAwarder(programId: bigint, awarder: `0x${string}`, allowed: boolean): Promise<Hex> {
     return this.send(this.program, "grantAwarder", [programId, awarder, allowed]);
@@ -247,3 +269,5 @@ export class WaveClient {
 export function createWaveClient(cfg: WaveClientConfig): WaveClient {
   return new WaveClient(cfg);
 }
+
+export { waveStore };
