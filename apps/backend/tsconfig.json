@@ -7,19 +7,9 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "ES2024"],
     "esModuleInterop": true,
-    "declaration": true,
-    "declarationMap": true,
+    "declaration": false,
     "sourceMap": true,
-    "types": ["node"],
-    "composite": true,
-    "incremental": true,
-    "baseUrl": ".",
-    "paths": {
-      "@zerolance/shared": ["../../packages/shared/dist/index.d.ts"],
-      "@zerolance/shared/*": ["../../packages/shared/dist/*"],
-      "@zerolance/config": ["../../packages/config/dist/index.d.ts"],
-      "@zerolance/config/*": ["../../packages/config/dist/*"]
-    }
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
