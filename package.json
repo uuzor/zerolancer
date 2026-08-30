@@ -11,6 +11,7 @@
   },
   "packageManager": "pnpm@10.22.0",
   "scripts": {
+    "postinstall": "node -e \"const fs=require('fs');const path=require('path');const root=process.cwd();const pkgs={config:path.join(root,'packages','config'),shared:path.join(root,'packages','shared')};Object.entries(pkgs).forEach(([name,target])=>{['packages/shared','apps/backend','apps/oracle','apps/frontend'].forEach(dir=>{const nm=path.join(root,dir,'node_modules');const scope=path.join(nm,'@zerolance');fs.mkdirSync(scope,{recursive:true});const link=path.join(scope,name);try{const ex=fs.lstatSync(link,{throwIfNoEntry:false});if(ex)fs.unlinkSync(link);fs.symlinkSync(target,link,'junction');}catch(e){}});});\"",
     "build": "pnpm --filter @zerolance/config build && pnpm --filter @zerolance/oracle build && pnpm --filter @zerolance/backend build",
     "build:all": "pnpm build && pnpm --filter @zerolance/frontend build",
     "start": "node apps/backend/dist/index.js",
