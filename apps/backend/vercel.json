@@ -1,4 +1,4 @@
 {
   "$schema": "https://vercel.com/vercel-project-config.json",
-  "buildCommand": "cd ../.. && node -e \"const fs=require('fs');const path=require('path');const root=process.cwd();const pkgs={config:path.join(root,'packages','config'),shared:path.join(root,'packages','shared')};Object.entries(pkgs).forEach(([name,target])=>{['packages/shared','apps/backend','apps/oracle','apps/frontend'].forEach(dir=>{const nm=path.join(root,dir,'node_modules');const scope=path.join(nm,'@zerolance');fs.mkdirSync(scope,{recursive:true});const link=path.join(scope,name);try{const ex=fs.lstatSync(link,{throwIfNoEntry:false});if(ex)fs.unlinkSync(link);fs.symlinkSync(target,link,'junction');}catch(e){}});});\" && rm -f packages/config/tsconfig.tsbuildinfo packages/shared/tsconfig.tsbuildinfo && pnpm --filter @zerolance/config build && pnpm --filter @zerolance/shared build && cd apps/backend && pnpm build"
+  "buildCommand": "cd ../.. && node scripts/fix-symlinks.mjs && pnpm --filter @zerolance/config build && pnpm --filter @zerolance/shared build && cd apps/backend && pnpm build"
 }
