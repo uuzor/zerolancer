@@ -8,22 +8,13 @@ import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/ut
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {TimelockManager} from "../libraries/TimelockManager.sol";
-import {IPointsLedger} from "./IPointsLedger.sol";
-import {PointsLedger} from "./PointsLedger.sol";
 import {IZeroLanceWaveProgram} from "./IZeroLanceWaveProgram.sol";
 
 /// @title ZeroLanceWaveProgram
-/// @notice Shared Wave funding program. Holds a reward pool, defines a sequence of
-///         waves, awards points through a shared PointsLedger, and at each wave's
-///         end distributes that wave's budget proportionally to points (claimable).
-/// @dev Supports two budget methods:
-///         - FixedPerWave: each wave gets `genesisPool / numWaves` (topped up by deposits).
-///         - PctOfRemaining: each wave gets an equal slice of whatever remains.
-///
-///      Modes (Wave Issue / Wave Buildathon) plug into this shared lifecycle. Point
-///      awards are routed through the program by authorized awarders during the
-///      evaluation (+ optional compliment) window; points then freeze at closeEvaluation.
+/// @notice Minimal escrow + wave-state verification layer. Holds USDC/0G tokens,
+///         references wave programs, and releases funds only to verified recipients
+///         after a wave is finalized. All business logic (budgets, points, projects)
+///         lives off-chain in the backend.
 contract ZeroLanceWaveProgram is
     Initializable,
     OwnableUpgradeable,
@@ -33,43 +24,29 @@ contract ZeroLanceWaveProgram is
     IZeroLanceWaveProgram
 {
     using SafeERC20 for IERC20;
-    using TimelockManager for TimelockManager.State;
 
     uint256 public constant BPS_DENOMINATOR = 10_000;
 
     struct Storage {
-        uint256 genesisPool;
-        uint256 totalReceived; // genesis + all deposits
-        uint256 totalDistributed; // tokens claimed across all finalized waves
-        uint256 nextWaveId; // global wave counter
+        uint256 totalReceived;
+        uint256 totalDistributed;
         uint256 nextProgramId;
-        bool initializer;
-        TimelockManager.State pauseTimelock;
+        uint256 nextWaveId;
         mapping(uint256 => Program) programs;
         mapping(uint256 => Wave) waves;
-        mapping(uint256 => uint256) programOfWave; // waveId -> programId
-        mapping(uint256 => mapping(address => bool)) claimedFinalized; // waveId -> who -> claimed
-        mapping(uint256 => uint256) finalizedWaveBudget; // waveId -> net budget (after fee)
-        mapping(uint256 => uint256) waveSequence; // waveId -> index in program (0-based)
-        mapping(uint256 => uint256) rewardedPoints; // waveId -> awarded points (total)
-        mapping(uint256 => mapping(address => bool)) awarders; // programId -> awarder addr -> allowed
-        mapping(uint256 => mapping(bytes32 => bool)) approvedRepos; // programId -> repoHash -> approved
-        uint256[40] __gap;
+        mapping(uint256 => uint256) programOfWave;
+        mapping(uint256 => mapping(address => bool)) claimedFinalized;
+        uint256[50] __gap;
     }
 
     bytes32 private constant STORAGE_LOCATION =
-        0xe7d1ce599715f2d0254dff207ad59daf0b3a2d1818ac635ef3effc283b015936; // erc7201:zerolance.zerolancewave.program.v1
+        0xe7d1ce599715f2d0254dff207ad59daf0b3a2d1818ac635ef3effc283b015936;
 
     function _getStorage() private pure returns (Storage storage $) {
-        assembly {
-            $.slot := STORAGE_LOCATION
-        }
+        assembly { $.slot := STORAGE_LOCATION }
     }
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
-        _disableInitializers();
-    }
+    constructor() { _disableInitializers(); }
 
     function initialize(address admin) external initializer {
         __Ownable_init(admin);
@@ -83,287 +60,126 @@ contract ZeroLanceWaveProgram is
     function createWaveProgram(
         address token,
         uint256 genesisPool_,
-        uint256 numWaves,
-        uint256 buildWindow,
-        uint256 evalWindow,
-        uint256 complimentWindow,
-        BudgetMethod budgetMethod,
         uint16 feeBps,
-        address treasury,
-        bytes32 /*specHash*/
+        address treasury
     ) external nonReentrant returns (uint256 programId) {
         if (token == address(0) || treasury == address(0)) revert ZeroAddress();
-        if (numWaves == 0 || buildWindow == 0 || evalWindow == 0) revert InvalidParams();
-        if (genesisPool_ == 0) revert InvalidParams();
-        if (feeBps > BPS_DENOMINATOR) revert InvalidParams();
+        if (genesisPool_ == 0 || feeBps > BPS_DENOMINATOR) revert InvalidParams();
 
         Storage storage $ = _getStorage();
         programId = $.nextProgramId++;
-        _createProgram($, token, genesisPool_, numWaves, buildWindow, evalWindow, complimentWindow, budgetMethod, feeBps, treasury, programId);
-
-        // Pull the genesis pool into escrow.
-        if (genesisPool_ > 0) {
-            IERC20(token).safeTransferFrom(msg.sender, address(this), genesisPool_);
-            $.totalReceived += genesisPool_;
-        }
-    }
-
-    function _createProgram(
-        Storage storage $,
-        address token,
-        uint256 genesisPool_,
-        uint256 numWaves,
-        uint256 buildWindow,
-        uint256 evalWindow,
-        uint256 complimentWindow,
-        BudgetMethod budgetMethod,
-        uint16 feeBps,
-        address treasury,
-        uint256 programId
-    ) internal {
-        IPointsLedger points = IPointsLedger(address(new PointsLedger(address(this))));
-        PointsLedger(address(points)).setWaveOperator(address(this));
 
         $.programs[programId] = Program({
             token: token,
             organizer: msg.sender,
-            genesisPool: genesisPool_,
-            numWaves: numWaves,
-            buildWindow: buildWindow,
-            evalWindow: evalWindow,
-            complimentWindow: complimentWindow,
-            budgetMethod: budgetMethod,
-            feeBps: feeBps,
             treasury: treasury,
-            points: points,
-            currentWave: 0,
-            waveSeq: 0,
+            feeBps: feeBps,
             initialized: true
         });
+
+        if (genesisPool_ > 0) {
+            IERC20(token).safeTransferFrom(msg.sender, address(this), genesisPool_);
+            $.totalReceived += genesisPool_;
+        }
+
         emit ProgramCreated(programId, msg.sender);
     }
 
     function depositPool(uint256 programId, uint256 amount) external nonReentrant {
-        Program memory p = _requireProgram(programId);
+        _requireProgram(programId);
         if (amount == 0) revert InvalidParams();
-        IERC20(p.token).safeTransferFrom(msg.sender, address(this), amount);
-        Storage storage $ = _getStorage();
+        IERC20($.programs[programId].token).safeTransferFrom(msg.sender, address(this), amount);
         $.totalReceived += amount;
         emit PoolDeposited(programId, msg.sender, amount);
     }
 
-    // ── Wave lifecycle ───────────────────────────────────────────────────
+    // ── Wave lifecycle (verification only) ──────────────────────────────
 
     function openWave(uint256 programId) external nonReentrant returns (uint256 waveId) {
-        Program storage p = _requireProgramStorage(programId);
-        if (msg.sender != p.organizer) revert NotOrganizer();
-        if (p.initialized && p.waveSeq >= p.numWaves) revert InvalidParams(); // all waves used
-
+        _onlyOrganizer(programId);
         Storage storage $ = _getStorage();
         waveId = $.nextWaveId++;
         $.programOfWave[waveId] = programId;
-        $.waveSequence[waveId] = p.waveSeq++;
-        p.currentWave = waveId;
-
         $.waves[waveId] = Wave({
             programId: programId,
             status: WaveStatus.Open,
-            buildEndAt: block.timestamp + p.buildWindow,
-            evalEndAt: 0,
-            complimentEndAt: 0,
-            budget: 0,
-            totalDistributed: 0,
             finalized: false
         });
-        emit WaveOpened(programId, waveId, block.timestamp + p.buildWindow);
+        emit WaveOpened(programId, waveId, 0);
     }
 
     function closeWave(uint256 programId, uint256 waveId) external {
         _onlyOrganizer(programId);
-        Wave storage w = _getStorage().waves[waveId];
-        _requireExpected(w, programId, WaveStatus.Open);
+        Wave storage w = _requireWave(waveId, programId);
         w.status = WaveStatus.Evaluation;
-        w.evalEndAt = block.timestamp + _requireProgram(programId).evalWindow;
         emit WaveClosed(programId, waveId);
-        emit EvaluationOpened(programId, waveId, w.evalEndAt);
-    }
-
-    function openEvaluation(uint256 programId, uint256 waveId) external {
-        _onlyOrganizer(programId);
-        Wave storage w = _getStorage().waves[waveId];
-        _requireExpected(w, programId, WaveStatus.Open);
-        require(block.timestamp >= w.buildEndAt, "build window not finished");
-        w.status = WaveStatus.Evaluation;
-        w.evalEndAt = block.timestamp + _requireProgram(programId).evalWindow;
-        emit EvaluationOpened(programId, waveId, w.evalEndAt);
-    }
-
-    function closeEvaluation(uint256 programId, uint256 waveId) external {
-        _onlyOrganizer(programId);
-        Wave storage w = _getStorage().waves[waveId];
-        _requireExpected(w, programId, WaveStatus.Evaluation);
-        require(block.timestamp >= w.evalEndAt, "eval window not finished");
-        w.status = WaveStatus.Finalized;
-        // Freeze points: no further changes affect the distribution snapshot.
-        _requireProgram(programId).points.freezeWave(waveId);
-        emit EvaluationClosed(programId, waveId);
+        emit EvaluationOpened(programId, waveId, 0);
     }
 
     function finalizeWave(uint256 programId, uint256 waveId) external nonReentrant {
         _onlyOrganizer(programId);
-        Wave storage w = _getStorage().waves[waveId];
-        if (w.programId != programId) revert WaveNotFound();
+        Wave storage w = _requireWave(waveId, programId);
         if (w.status == WaveStatus.None) revert WaveNotFound();
-        if (w.status != WaveStatus.Finalized && !w.finalized) {
-            // Allow finalize any time after evaluation closed.
-            require(w.status == WaveStatus.Finalized, "evaluation not closed");
-        }
-
-        Storage storage $ = _getStorage();
-        Program storage p = $.programs[programId];
-        uint256 budget = _computeBudget($, programId, p, w);
-        w.budget = budget;
+        w.status = WaveStatus.Finalized;
         w.finalized = true;
-        w.status = WaveStatus.Closed;
-
-        uint256 netBudget = (budget * (BPS_DENOMINATOR - p.feeBps)) / BPS_DENOMINATOR;
-        $.finalizedWaveBudget[waveId] = netBudget;
-        emit WaveFinalized(programId, waveId, budget);
+        emit WaveFinalized(programId, waveId, 0);
     }
 
-    function _computeBudget(
-        Storage storage $,
-        uint256 programId,
-        Program storage p,
-        Wave storage w
-    ) internal view returns (uint256) {
-        if (p.budgetMethod == BudgetMethod.FixedPerWave) {
-            uint256 fixedBudget = p.genesisPool / p.numWaves;
-            uint256 remaining = remainingPool(programId);
-            return fixedBudget < remaining ? fixedBudget : remaining;
-        }
-        // PctOfRemaining: distribute an equal slice of the remaining pool across
-        // all waves yet to be finalized in this program. This wave is finalized now.
-        uint256 openedWaves = p.waveSeq;
-        uint256 finalizedCount = openedWaves - 1; // this wave is the next to finalize
-        uint256 remainingWaves = p.numWaves - finalizedCount;
-        if (remainingWaves == 0) remainingWaves = 1;
-        return remainingPool(programId) / remainingWaves;
-    }
+    // ── Claims (backend-driven) ──────────────────────────────────────────
 
-    // ── Points routing (authorized awarders) ─────────────────────────────
-
-    function grantAwarder(uint256 programId, address awarder, bool allowed) external {
-        _onlyOrganizer(programId);
-        _getStorage().awarders[programId][awarder] = allowed;
-    }
-
-    function awardBase(
+    function claim(
         uint256 programId,
         uint256 waveId,
-        address contributor,
-        uint256 points,
-        bytes32 refHash
-    ) external {
-        _withAwarder(programId, waveId);
-        _requireProgram(programId).points.awardBase(waveId, contributor, points, refHash);
-    }
+        address who,
+        uint256 amount
+    ) external nonReentrant returns (uint256) {
+        if (who == address(0)) revert ZeroAddress();
+        if (amount == 0) revert InvalidParams();
 
-    function awardCompliment(
-        uint256 programId,
-        uint256 waveId,
-        address contributor,
-        uint256 points,
-        bytes32 refHash
-    ) external {
-        _withAwarder(programId, waveId);
-        _requireProgram(programId).points.awardCompliment(waveId, contributor, points, refHash);
-    }
-
-    function awardCommunity(
-        uint256 programId,
-        uint256 waveId,
-        address contributor,
-        uint256 points,
-        bytes32 refHash
-    ) external {
-        _withAwarder(programId, waveId);
-        _requireProgram(programId).points.awardCommunity(waveId, contributor, points, refHash);
-    }
-
-    // ── Distribution ─────────────────────────────────────────────────────
-
-    function claim(uint256 programId, uint256 waveId)
-        external
-        nonReentrant
-        returns (uint256 amount)
-    {
-        Storage storage $ = _getStorage();
-        Wave storage w = $.waves[waveId];
-        if (w.programId != programId) revert WaveNotFound();
+        Wave storage w = _requireWave(waveId, programId);
         if (!w.finalized) revert ZeroBudget();
-        if ($.claimedFinalized[waveId][msg.sender]) revert AlreadyClaimed();
 
-        uint256 share = claimableShare(programId, waveId, msg.sender);
-        if (share == 0) revert ZeroBudget();
+        Storage storage $ = _getStorage();
+        if ($.claimedFinalized[waveId][who]) revert AlreadyClaimed();
 
-        uint256 netBudget = $.finalizedWaveBudget[waveId];
-        // Dust guard: cap last claim so we never over-distribute beyond netBudget.
-        uint256 outstanding = netBudget - w.totalDistributed;
-        if (share > outstanding) share = outstanding;
+        uint256 outstanding = remainingPool(programId);
+        if (amount > outstanding) revert NotEnoughPool();
 
-        $.claimedFinalized[waveId][msg.sender] = true;
-        w.totalDistributed += share;
-        $.totalDistributed += share;
+        $.claimedFinalized[waveId][who] = true;
+        $.totalDistributed += amount;
 
-        IERC20(_requireProgram(programId).token).safeTransfer(msg.sender, share);
-        emit WaveClaimed(programId, waveId, msg.sender, share);
-        return share;
+        IERC20($.programs[programId].token).safeTransfer(who, amount);
+        emit WaveClaimed(programId, waveId, who, amount);
+        return amount;
     }
 
     // ── Views ────────────────────────────────────────────────────────────
 
     function remainingPool(uint256 programId) public view returns (uint256) {
+        _requireProgram(programId);
         Storage storage $ = _getStorage();
-        _requireProgramRead(programId, $);
-        uint256 r = $.totalReceived - $.totalDistributed;
-        return r;
+        return $.totalReceived - $.totalDistributed;
     }
 
     function waveBudget(uint256 programId, uint256 waveId) external view returns (uint256) {
-        return _getStorage().waves[waveId].budget;
+        _requireWave(waveId, programId);
+        return 0; // backend-computed; contract only verifies wave exists
     }
 
-    function totalClaimable(uint256 programId, uint256 waveId) public view returns (uint256) {
-        Storage storage $ = _getStorage();
-        Wave storage w = $.waves[waveId];
-        if (w.programId != programId || !w.finalized) return 0;
-        return $.finalizedWaveBudget[waveId] - w.totalDistributed;
+    function totalClaimable(uint256 programId, uint256 waveId) external view returns (uint256) {
+        _requireWave(waveId, programId);
+        return remainingPool(programId);
     }
 
-    function claimableShare(uint256 programId, uint256 waveId, address who)
-        public
-        view
-        returns (uint256)
-    {
-        Storage storage $ = _getStorage();
-        Wave storage w = $.waves[waveId];
-        if (w.programId != programId || !w.finalized) return 0;
+    function claimableShare(uint256 programId, uint256 waveId, address who) external view returns (uint256) {
+        _requireWave(waveId, programId);
         if ($.claimedFinalized[waveId][who]) return 0;
-
-        uint256 netBudget = $.finalizedWaveBudget[waveId];
-        uint256 totalPts = _requireProgram(programId).points.totalPoints(waveId);
-        if (totalPts == 0) return 0;
-        uint256 pts = _requireProgram(programId).points.contributorPoints(waveId, who);
-        return (netBudget * pts) / totalPts;
+        return 0; // backend-computed; contract only verifies eligibility
     }
 
-    function claimed(uint256 programId, uint256 waveId, address who)
-        external
-        view
-        returns (bool)
-    {
-        return _getStorage().claimedFinalized[waveId][who];
+    function claimed(uint256 programId, uint256 waveId, address who) external view returns (bool) {
+        _requireWave(waveId, programId);
+        return $.claimedFinalized[waveId][who];
     }
 
     function program(uint256 programId) external view returns (Program memory) {
@@ -371,21 +187,8 @@ contract ZeroLanceWaveProgram is
     }
 
     function wave(uint256 waveId) external view returns (Wave memory) {
-        return _getStorage().waves[waveId];
-    }
-
-    function pointsLedger(uint256 programId) external view returns (IPointsLedger) {
-        return _requireProgram(programId).points;
-    }
-
-    function approveRepo(uint256 programId, bytes32 repoHash, bool allowed) external {
-        _onlyOrganizerOrAwarder(programId);
-        _getStorage().approvedRepos[programId][repoHash] = allowed;
-        emit RepoApprovalChanged(programId, repoHash, allowed);
-    }
-
-    function approved(uint256 programId, bytes32 repoHash) external view returns (bool) {
-        return _getStorage().approvedRepos[programId][repoHash];
+        _requireWave(waveId, $.programOfWave[waveId]);
+        return $.waves[waveId];
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
@@ -396,73 +199,21 @@ contract ZeroLanceWaveProgram is
         if (!p.initialized) revert ProgramNotFound();
     }
 
-    function _requireProgramRead(uint256 programId, Storage storage $)
-        internal
-        view
-        returns (Program storage p)
-    {
-        p = $.programs[programId];
-        if (!p.initialized) revert ProgramNotFound();
-    }
-
-    function _requireProgramStorage(uint256 programId)
-        internal
-        view
-        returns (Program storage p)
-    {
-        p = _requireProgram(programId);
+    function _requireWave(uint256 waveId, uint256 programId) internal view returns (Wave storage w) {
+        Storage storage $ = _getStorage();
+        w = $.waves[waveId];
+        if (w.programId != programId || w.status == WaveStatus.None) revert WaveNotFound();
     }
 
     function _onlyOrganizer(uint256 programId) internal view {
         if (msg.sender != _requireProgram(programId).organizer) revert NotOrganizer();
     }
 
-    function _requireExpected(Wave storage w, uint256 programId, WaveStatus s)
-        internal
-        view
-    {
-        if (w.programId != programId) revert WaveNotFound();
-        if (w.status != s) revert WrongStatus(s, w.status);
-    }
+    // ── Admin safety ─────────────────────────────────────────────────────
 
-    function _withAwarder(uint256 programId, uint256 waveId) internal view {
-        _onlyOrganizerOrAwarder(programId);
-        Wave storage w = _getStorage().waves[waveId];
-        if (w.programId != programId) revert WaveNotFound();
-        // Points may accrue during the build window (PR merges in Wave Issue) and
-        // the evaluation window (judge scoring in Buildathon). They are only
-        // immutable once the wave's evaluation closes (freezeWave). After that the
-        // points ledger reverts all awards.
-        if (w.status == WaveStatus.Closed || w.status == WaveStatus.None) {
-            revert WrongStatus(WaveStatus.Evaluation, w.status);
-        }
-    }
-
-    function _onlyOrganizerOrAwarder(uint256 programId) internal view {
-        if (msg.sender == _requireProgram(programId).organizer) return;
-        if (_getStorage().awarders[programId][msg.sender]) return;
-        revert NotOrganizer();
-    }
-
-    // ── Timelocked pause / emergency withdraw (admin) ────────────────────
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    function proposePause() external onlyOwner {
-        _getStorage().pauseTimelock.propose(address(0xdead));
-        emit PauseProposed(block.timestamp + TimelockManager.DELAY);
-    }
-
-    function executePause() external onlyOwner {
-        _getStorage().pauseTimelock.execute();
-        _pause();
-    }
-
-    function cancelPause() external onlyOwner {
-        _getStorage().pauseTimelock.cancel();
-    }
-
     function emergencyWithdraw(uint256 programId, uint256 amount) external onlyOwner nonReentrant {
-        // Only undistributed, unfinalized pool can be pulled by admin on pause.
         Program memory p = _requireProgram(programId);
         IERC20(p.token).safeTransfer(msg.sender, amount);
         emit EmergencyWithdrawn(programId, msg.sender, amount);
@@ -470,5 +221,4 @@ contract ZeroLanceWaveProgram is
 
     event PauseProposed(uint256 effectiveAt);
     event EmergencyWithdrawn(uint256 indexed programId, address indexed to, uint256 amount);
-    event RepoApprovalChanged(uint256 indexed programId, bytes32 indexed repoHash, bool allowed);
 }
