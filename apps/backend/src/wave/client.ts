@@ -18,13 +18,10 @@ export interface WaveClientConfig {
   signer?: Wallet;
 }
 
-/// Server-side client for the Wave funding stack (WaveProgram + Wave Issue +
-/// Wave Buildathon). Read-only by default; privileged writes require a signer.
 export class WaveClient {
   readonly program: TypedContract<unknown>;
   readonly issue: TypedContract<unknown>;
   readonly buildathon: TypedContract<unknown>;
-  readonly points: TypedContract<unknown>;
   readonly signer: Wallet | undefined;
   readonly programAddress: `0x${string}`;
   readonly issueAddress: `0x${string}`;
@@ -50,11 +47,6 @@ export class WaveClient {
       [...ZEROLANCE_WAVE_BUILDATHON_ABI],
       runner,
     );
-    this.points = new TypedContract(
-      cfg.waveProgramAddress,
-      [...ZEROLANCE_POINTS_LEDGER_ABI],
-      runner,
-    );
     this.signer = cfg.signer;
   }
 
@@ -69,20 +61,11 @@ export class WaveClient {
     return (await fn!(...args)) as T;
   }
 
-  private async ledgerFor(programId: bigint): Promise<TypedContract<unknown>> {
-    const addr = await this.read<`0x${string}`>(this.program, "pointsLedger", [programId]);
-    return new TypedContract(
-      addr,
-      [...ZEROLANCE_POINTS_LEDGER_ABI],
-      this.signer ?? this.cfg.provider,
-    );
-  }
-
   // ── WaveProgram reads ────────────────────────────────────────────────────
   async programOf(programId: bigint): Promise<unknown> {
     return this.read(this.program, "program", [programId]);
   }
-  async waveOf(programId: bigint, waveId: bigint): Promise<unknown> {
+  async waveOf(waveId: bigint): Promise<unknown> {
     return this.read(this.program, "wave", [waveId]);
   }
   async remainingPool(programId: bigint): Promise<bigint> {
@@ -100,16 +83,11 @@ export class WaveClient {
   async claimed(programId: bigint, waveId: bigint, who: `0x${string}`): Promise<boolean> {
     return this.read(this.program, "claimed", [programId, waveId, who]);
   }
-  async approved(programId: bigint, repoHash: `0x${string}`): Promise<boolean> {
-    return this.read(this.program, "approved", [programId, repoHash]);
+  async projectOf(projectId: bigint): Promise<unknown> {
+    return this.read(this.program, "project", [projectId]);
   }
-  async totalPoints(programId: bigint, waveId: bigint): Promise<bigint> {
-    const ledger = await this.ledgerFor(programId);
-    return this.read(ledger, "totalPoints", [waveId]);
-  }
-  async contributorPoints(programId: bigint, waveId: bigint, who: `0x${string}`): Promise<bigint> {
-    const ledger = await this.ledgerFor(programId);
-    return this.read(ledger, "contributorPoints", [waveId, who]);
+  async waveProjects(programId: bigint, waveId: bigint): Promise<unknown> {
+    return this.read(this.program, "waveProjects", [programId, waveId]);
   }
 
   // ── Wave Issue reads ─────────────────────────────────────────────────────
@@ -145,50 +123,17 @@ export class WaveClient {
   }
 
   // ── Write: program lifecycle ─────────────────────────────────────────────
-  async depositPool(programId: bigint, amount: bigint): Promise<Hex> {
-    return this.send(this.program, "depositPool", [programId, amount]);
-  }
-  async openWave(programId: bigint): Promise<Hex> {
-    return this.send(this.program, "openWave", [programId]);
-  }
-  async closeWave(programId: bigint, waveId: bigint): Promise<Hex> {
-    return this.send(this.program, "closeWave", [programId, waveId]);
-  }
-  async openEvaluation(programId: bigint, waveId: bigint): Promise<Hex> {
-    return this.send(this.program, "openEvaluation", [programId, waveId]);
-  }
-  async closeEvaluation(programId: bigint, waveId: bigint): Promise<Hex> {
-    return this.send(this.program, "closeEvaluation", [programId, waveId]);
-  }
-  async finalizeWave(programId: bigint, waveId: bigint): Promise<Hex> {
-    return this.send(this.program, "finalizeWave", [programId, waveId]);
-  }
-  async claim(programId: bigint, waveId: bigint): Promise<Hex> {
-    return this.send(this.program, "claim", [programId, waveId]);
-  }
   async createWaveProgram(
     token: `0x${string}`,
     genesisPool: bigint,
-    numWaves: bigint,
-    buildWindow: bigint,
-    evalWindow: bigint,
-    complimentWindow: bigint,
-    budgetMethod: number,
     feeBps: number,
     treasury: `0x${string}`,
-    specHash: `0x${string}`,
   ): Promise<{ txHash: Hex; programId: bigint }> {
     const { txHash, receipt } = await this.sendWithReceipt(this.program, "createWaveProgram", [
       token,
       genesisPool,
-      numWaves,
-      buildWindow,
-      evalWindow,
-      complimentWindow,
-      budgetMethod,
       feeBps,
       treasury,
-      specHash,
     ]);
     const iface = new Interface([...ZEROLANCE_WAVE_PROGRAM_ABI]);
     let programId = BigInt(0);
@@ -199,13 +144,39 @@ export class WaveClient {
           programId = parsed.args.programId;
           break;
         }
-      } catch {
-      }
+      } catch {}
     }
     return { txHash, programId };
   }
-  async grantAwarder(programId: bigint, awarder: `0x${string}`, allowed: boolean): Promise<Hex> {
-    return this.send(this.program, "grantAwarder", [programId, awarder, allowed]);
+
+  async depositPool(programId: bigint, amount: bigint): Promise<Hex> {
+    return this.send(this.program, "depositPool", [programId, amount]);
+  }
+  async openWave(programId: bigint): Promise<Hex> {
+    return this.send(this.program, "openWave", [programId]);
+  }
+  async closeWave(programId: bigint, waveId: bigint): Promise<Hex> {
+    return this.send(this.program, "closeWave", [programId, waveId]);
+  }
+  async finalizeWave(programId: bigint, waveId: bigint): Promise<Hex> {
+    return this.send(this.program, "finalizeWave", [programId, waveId]);
+  }
+  async claim(programId: bigint, waveId: bigint, who: `0x${string}`): Promise<Hex> {
+    return this.send(this.program, "claim", [programId, waveId, who]);
+  }
+
+  // ── Write: projects ─────────────────────────────────────────────────────
+  async registerProject(
+    programId: bigint,
+    waveId: bigint,
+    builder: `0x${string}`,
+    repoHash: `0x${string}`,
+  ): Promise<Hex> {
+    return this.send(this.program, "registerProject", [programId, waveId, builder, repoHash]);
+  }
+
+  async setProjectPoints(projectId: bigint, points: bigint): Promise<Hex> {
+    return this.send(this.program, "setProjectPoints", [projectId, points]);
   }
 
   // ── Write: Wave Issue ────────────────────────────────────────────────────

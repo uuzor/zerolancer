@@ -9,14 +9,8 @@ export interface ProgramSummary {
   programId: string;
   organizer: string;
   token: string;
-  genesisPool: string;
-  numWaves: string;
-  buildWindow: string;
-  evalWindow: string;
-  complimentWindow: string;
-  budgetMethod: string;
-  feeBps: string;
   treasury: string;
+  feeBps: string;
   description: string;
   createdAt: string;
   updatedAt: string;
@@ -86,12 +80,8 @@ export default function Programs() {
                     <Address value={prog.organizer} />
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Pool</span>
-                    <Money value={prog.genesisPool ?? "0"} token="USDC" />
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Waves</span>
-                    <span>{prog.numWaves ?? "0"}</span>
+                    <span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Fee</span>
+                    <span>{prog.feeBps} bps</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Updated</span>

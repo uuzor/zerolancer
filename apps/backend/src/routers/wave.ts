@@ -5,7 +5,6 @@ import type { ServerConfig } from "../server.js";
 import { WaveClient, waveStore } from "../wave/client.js";
 import { HTTP, bigintReplacer } from "@zerolance/config";
 import { sendError } from "../utils/response.js";
-import type { WaveProgramRow, WaveProjectRow, WaveBuilderRow, WavePointsRow } from "../wave/store.js";
 
 const idsSchema = z.object({
   programId: z.coerce.bigint().nonnegative(),
@@ -15,26 +14,6 @@ const waveIdsSchema = idsSchema.extend({
 });
 const claimableSchema = waveIdsSchema.extend({
   who: z.string(),
-});
-const writeWaveArgs = z.object({
-  programId: z.coerce.bigint().nonnegative(),
-  waveId: z.coerce.bigint().nonnegative().optional(),
-  amount: z.string().optional(),
-  repoHash: z.string().optional(),
-  specHash: z.string().optional(),
-  issueId: z.coerce.bigint().optional(),
-  basePoints: z.coerce.bigint().optional(),
-  complexity: z.coerce.bigint().optional(),
-  deliverableHash: z.string().optional(),
-  prNumber: z.coerce.bigint().optional(),
-  team: z.string().optional(),
-  teamId: z.coerce.bigint().optional(),
-  contentHash: z.string().optional(),
-  who: z.string().optional(),
-  allowed: z.boolean().optional(),
-  subId: z.coerce.bigint().optional(),
-  points: z.coerce.bigint().optional(),
-  weight: z.coerce.bigint().optional(),
 });
 
 function clientOf(cfg: ServerConfig, res: Response): WaveClient | null {
@@ -49,7 +28,6 @@ function bigintStringify(value: unknown): string {
   return JSON.stringify(value, bigintReplacer);
 }
 
-/// Register Wave (Buildathon + Issue) REST endpoints backed by the WaveClient.
 export function registerWaveRoutes(app: Router, config: ServerConfig): void {
   createRoute(app, {
     path: "/v1/wave/program/:id",
@@ -65,16 +43,16 @@ export function registerWaveRoutes(app: Router, config: ServerConfig): void {
   }, config);
 
   createRoute(app, {
-    path: "/v1/wave/program/:id/wave/:waveId",
+    path: "/v1/wave/wave/:waveId",
     method: "get",
+    requireId: true,
     consumer: "wave.wave",
-    description: "Read a single wave within a program",
+    description: "Read a single wave",
   }, async (_p, _req, res) => {
     const wave = clientOf(config, res);
     if (!wave) return null;
-    const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
     const waveId = BigInt(parseInt(_req.params.waveId ?? "0", 10));
-    const data = await wave.waveOf(programId, waveId);
+    const data = await wave.waveOf(waveId);
     return { wave: bigintStringify(data) };
   }, config);
 
@@ -92,7 +70,7 @@ export function registerWaveRoutes(app: Router, config: ServerConfig): void {
       wave.remainingPool(programId),
       wave.waveBudget(programId, waveId),
       wave.totalClaimable(programId, waveId),
-      wave.totalPoints(programId, waveId),
+      wave.totalClaimable(programId, waveId),
     ]);
     return {
       remainingPool: remaining.toString(),
@@ -150,7 +128,7 @@ export function registerWaveRoutes(app: Router, config: ServerConfig): void {
     return { submission: bigintStringify(sub) };
   }, config);
 
-  // -- Writes ---------------------------------------------------------------
+  // ── Writes ---------------------------------------------------------------
   createRoute(app, {
     path: "/v1/wave/program/:id/deposit",
     schema: z.object({ amount: z.string() }),
@@ -178,20 +156,50 @@ export function registerWaveRoutes(app: Router, config: ServerConfig): void {
   }, config);
 
   createRoute(app, {
-    path: "/v1/wave/program/:id/claim",
+    path: "/v1/wave/program/:id/close-wave",
+    method: "post",
     schema: z.object({ waveId: z.coerce.bigint() }),
-    consumer: "wave.claim",
-    description: "Claim a wave payout (signer)",
+    consumer: "wave.closeWave",
+    description: "Close a wave (signer)",
   }, async (parsed, _req, res) => {
     const wave = clientOf(config, res);
     if (!wave) return null;
     const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
-    const tx = await wave.claim(programId, parsed.waveId);
+    const tx = await wave.closeWave(programId, parsed.waveId);
+    return { txHash: tx };
+  }, config);
+
+  createRoute(app, {
+    path: "/v1/wave/program/:id/open-evaluation",
+    method: "post",
+    schema: z.object({ waveId: z.coerce.bigint() }),
+    consumer: "wave.openEvaluation",
+    description: "Open evaluation phase for a wave (signer)",
+  }, async (parsed, _req, res) => {
+    const wave = clientOf(config, res);
+    if (!wave) return null;
+    const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
+    const tx = await wave.openWave(programId);
+    return { txHash: tx };
+  }, config);
+
+  createRoute(app, {
+    path: "/v1/wave/program/:id/close-evaluation",
+    method: "post",
+    schema: z.object({ waveId: z.coerce.bigint() }),
+    consumer: "wave.closeEvaluation",
+    description: "Close evaluation phase for a wave (signer)",
+  }, async (parsed, _req, res) => {
+    const wave = clientOf(config, res);
+    if (!wave) return null;
+    const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
+    const tx = await wave.closeWave(programId, parsed.waveId);
     return { txHash: tx };
   }, config);
 
   createRoute(app, {
     path: "/v1/wave/program/:id/finalize",
+    method: "post",
     schema: z.object({ waveId: z.coerce.bigint() }),
     consumer: "wave.finalize",
     description: "Finalize a wave (signer)",
@@ -200,6 +208,25 @@ export function registerWaveRoutes(app: Router, config: ServerConfig): void {
     if (!wave) return null;
     const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
     const tx = await wave.finalizeWave(programId, parsed.waveId);
+    return { txHash: tx };
+  }, config);
+
+  createRoute(app, {
+    path: "/v1/wave/program/:id/claim",
+    method: "post",
+    schema: z.object({ waveId: z.coerce.bigint() }),
+    consumer: "wave.claim",
+    description: "Claim a wave payout (signer)",
+  }, async (parsed, _req, res) => {
+    const wave = clientOf(config, res);
+    if (!wave) return null;
+    const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
+    const who = _req.body?.who ?? config.signerAddress ?? "";
+    if (!who) {
+      sendError(res, HTTP.BAD_REQUEST, "who is required", "WHO_REQUIRED");
+      return null;
+    }
+    const tx = await wave.claim(programId, parsed.waveId, who as `0x${string}`);
     return { txHash: tx };
   }, config);
 
@@ -214,41 +241,28 @@ export function registerWaveRoutes(app: Router, config: ServerConfig): void {
     const body = parsed as {
       token: string;
       genesisPool: string;
-      numWaves: string;
-      buildWindow: string;
-      evalWindow: string;
-      complimentWindow: string;
-      budgetMethod: string;
       feeBps: string;
       treasury: string;
-      specHash: string;
-      description?: string;
     };
     const result = await wave.createWaveProgram(
       body.token as `0x${string}`,
       BigInt(body.genesisPool),
-      BigInt(body.numWaves),
-      BigInt(body.buildWindow),
-      BigInt(body.evalWindow),
-      BigInt(body.complimentWindow),
-      Number(body.budgetMethod),
       Number(body.feeBps),
       body.treasury as `0x${string}`,
-      body.specHash as `0x${string}`,
     );
     waveStore.upsertProgram({
       programId: result.programId.toString(),
       organizer: "",
       token: body.token,
       genesisPool: body.genesisPool,
-      numWaves: body.numWaves,
-      buildWindow: body.buildWindow,
-      evalWindow: body.evalWindow,
-      complimentWindow: body.complimentWindow,
-      budgetMethod: body.budgetMethod,
+      numWaves: "0",
+      buildWindow: "0",
+      evalWindow: "0",
+      complimentWindow: "0",
+      budgetMethod: "0",
       feeBps: body.feeBps,
       treasury: body.treasury,
-      description: body.description ?? "",
+      description: "",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -259,55 +273,55 @@ export function registerWaveRoutes(app: Router, config: ServerConfig): void {
     path: "/v1/wave/program/:id/awarder",
     method: "post",
     consumer: "wave.grantAwarder",
-    description: "Grant or revoke awarder role (signer)",
+    description: "Grant or revoke awarder role (deprecated)",
+  }, async (_p, _req, res) => {
+    sendError(res, HTTP.BAD_REQUEST, "Awarder role management moved off-chain", "DEPRECATED");
+    return null;
+  }, config);
+
+  createRoute(app, {
+    path: "/v1/wave/program/:id/project",
+    method: "post",
+    schema: z.object({
+      waveId: z.coerce.bigint().nonnegative(),
+      builder: z.string().min(42),
+      repoUrl: z.string().url(),
+      repoHash: z.string().min(2),
+      description: z.string().max(2000).optional(),
+    }),
+    consumer: "wave.createProject",
+    description: "Register a project on a wave",
   }, async (parsed, _req, res) => {
     const wave = clientOf(config, res);
     if (!wave) return null;
     const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
-    const body = parsed as { awarder: string; allowed: boolean };
-    const tx = await wave.grantAwarder(programId, body.awarder as `0x${string}`, body.allowed);
+    const body = parsed as {
+      waveId: bigint;
+      builder: string;
+      repoUrl: string;
+      repoHash: string;
+      description?: string;
+    };
+    const tx = await wave.registerProject(
+      programId,
+      body.waveId,
+      body.builder as `0x${string}`,
+      body.repoHash as `0x${string}`,
+    );
     return { txHash: tx };
   }, config);
 
   createRoute(app, {
-    path: "/v1/wave/program/:id/close-wave",
+    path: "/v1/wave/project/:id/points",
     method: "post",
-    consumer: "wave.closeWave",
-    description: "Close a wave (signer)",
+    schema: z.object({ points: z.coerce.bigint() }),
+    consumer: "wave.setProjectPoints",
+    description: "Set points for a project (signer)",
   }, async (parsed, _req, res) => {
     const wave = clientOf(config, res);
     if (!wave) return null;
-    const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
-    const waveId = BigInt(parseInt((parsed as any).waveId ?? "0", 10));
-    const tx = await wave.closeWave(programId, waveId);
-    return { txHash: tx };
-  }, config);
-
-  createRoute(app, {
-    path: "/v1/wave/program/:id/open-evaluation",
-    method: "post",
-    consumer: "wave.openEvaluation",
-    description: "Open evaluation phase for a wave (signer)",
-  }, async (parsed, _req, res) => {
-    const wave = clientOf(config, res);
-    if (!wave) return null;
-    const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
-    const waveId = BigInt(parseInt((parsed as any).waveId ?? "0", 10));
-    const tx = await wave.openEvaluation(programId, waveId);
-    return { txHash: tx };
-  }, config);
-
-  createRoute(app, {
-    path: "/v1/wave/program/:id/close-evaluation",
-    method: "post",
-    consumer: "wave.closeEvaluation",
-    description: "Close evaluation phase for a wave (signer)",
-  }, async (parsed, _req, res) => {
-    const wave = clientOf(config, res);
-    if (!wave) return null;
-    const programId = BigInt(parseInt(_req.params.id ?? "0", 10));
-    const waveId = BigInt(parseInt((parsed as any).waveId ?? "0", 10));
-    const tx = await wave.closeEvaluation(programId, waveId);
+    const projectId = BigInt(parseInt(_req.params.id!, 10));
+    const tx = await wave.setProjectPoints(projectId, parsed.points);
     return { txHash: tx };
   }, config);
 
@@ -343,63 +357,6 @@ export function registerWaveRoutes(app: Router, config: ServerConfig): void {
   }, config);
 
   createRoute(app, {
-    path: "/v1/wave/program/:id/project",
-    method: "post",
-    schema: z.object({
-      waveId: z.coerce.bigint().nonnegative(),
-      builder: z.string().min(42),
-      team: z.string().optional(),
-      repoUrl: z.string().url(),
-      repoHash: z.string().min(2),
-      description: z.string().max(2000).optional(),
-    }),
-    consumer: "wave.createProject",
-    description: "Submit a project to a wave",
-  }, async (parsed, _req, res) => {
-    const programId = _req.params.id ?? "";
-    const body = parsed as {
-      waveId: bigint;
-      builder: string;
-      team?: string;
-      repoUrl: string;
-      repoHash: string;
-      description?: string;
-    };
-    const id = `${programId}-${body.waveId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    waveStore.insertProject({
-      id,
-      programId,
-      waveId: body.waveId.toString(),
-      builder: body.builder,
-      team: body.team ?? "",
-      repoUrl: body.repoUrl,
-      repoHash: body.repoHash,
-      contentHash: "",
-      description: body.description ?? "",
-      status: "submitted",
-      pointsAwarded: "0",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    return { id };
-  }, config);
-
-  createRoute(app, {
-    path: "/v1/wave/project/:id",
-    method: "get",
-    requireId: true,
-    consumer: "wave.project",
-    description: "Read a single wave project",
-  }, async (_p, _req, res) => {
-    const project = waveStore.getProject(_req.params.id!);
-    if (!project) {
-      sendError(res, HTTP.NOT_FOUND, "project not found", "PROJECT_NOT_FOUND");
-      return null;
-    }
-    return { project };
-  }, config);
-
-  createRoute(app, {
     path: "/v1/wave/program/:id/builders",
     method: "get",
     consumer: "wave.builders",
@@ -408,43 +365,6 @@ export function registerWaveRoutes(app: Router, config: ServerConfig): void {
     const programId = _req.params.id ?? "";
     const builders = waveStore.listBuilders(programId);
     return { builders };
-  }, config);
-
-  createRoute(app, {
-    path: "/v1/wave/program/:id",
-    method: "patch",
-    schema: z.object({
-      description: z.string().max(2000).optional(),
-      name: z.string().max(200).optional(),
-    }),
-    consumer: "wave.updateProgram",
-    description: "Update DB-backed program metadata (description, name)",
-  }, async (parsed, _req, res) => {
-    const programId = _req.params.id ?? "";
-    const body = parsed as { description?: string; name?: string };
-    const existing = waveStore.getProgram(programId);
-    if (!existing) {
-      sendError(res, HTTP.NOT_FOUND, "program not found in DB", "PROGRAM_NOT_FOUND");
-      return null;
-    }
-    waveStore.upsertProgram({
-      ...existing,
-      programId: existing.programId,
-      organizer: existing.organizer,
-      token: existing.token,
-      genesisPool: existing.genesisPool,
-      numWaves: existing.numWaves,
-      buildWindow: existing.buildWindow,
-      evalWindow: existing.evalWindow,
-      complimentWindow: existing.complimentWindow,
-      budgetMethod: existing.budgetMethod,
-      feeBps: existing.feeBps,
-      treasury: existing.treasury,
-      description: body.description ?? existing.description,
-      createdAt: existing.createdAt,
-      updatedAt: new Date().toISOString(),
-    });
-    return { ok: true };
   }, config);
 
   createRoute(app, {
@@ -475,6 +395,21 @@ export function registerWaveRoutes(app: Router, config: ServerConfig): void {
       appliedAt: new Date().toISOString(),
     });
     return { ok: true };
+  }, config);
+
+  createRoute(app, {
+    path: "/v1/wave/project/:id",
+    method: "get",
+    requireId: true,
+    consumer: "wave.project",
+    description: "Read a single wave project",
+  }, async (_p, _req, res) => {
+    const project = waveStore.getProject(_req.params.id!);
+    if (!project) {
+      sendError(res, HTTP.NOT_FOUND, "project not found", "PROJECT_NOT_FOUND");
+      return null;
+    }
+    return { project };
   }, config);
 
   createRoute(app, {

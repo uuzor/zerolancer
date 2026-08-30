@@ -11,10 +11,9 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IZeroLanceWaveProgram} from "./IZeroLanceWaveProgram.sol";
 
 /// @title ZeroLanceWaveProgram
-/// @notice Minimal escrow + wave-state verification layer. Holds USDC/0G tokens,
-///         references wave programs, and releases funds only to verified recipients
-///         after a wave is finalized. All business logic (budgets, points, projects)
-///         lives off-chain in the backend.
+/// @notice Escrow + verification layer for wave programs. Holds USDC, tracks
+///         wave state, records project points (backend-computed), and distributes
+///         to builder wallets proportional to their project points in finalized waves.
 contract ZeroLanceWaveProgram is
     Initializable,
     OwnableUpgradeable,
@@ -32,10 +31,15 @@ contract ZeroLanceWaveProgram is
         uint256 totalDistributed;
         uint256 nextProgramId;
         uint256 nextWaveId;
+        uint256 nextProjectId;
         mapping(uint256 => Program) programs;
         mapping(uint256 => Wave) waves;
         mapping(uint256 => uint256) programOfWave;
         mapping(uint256 => mapping(address => bool)) claimedFinalized;
+        mapping(uint256 => Project) projects; // projectId -> project
+        mapping(uint256 => uint256) projectWave; // projectId -> waveId
+        mapping(uint256 => uint256) waveTotalPoints; // waveId -> sum of all project points
+        mapping(uint256 => mapping(address => uint256)) builderWavePoints; // waveId -> builder -> points
         uint256[50] __gap;
     }
 
@@ -125,16 +129,54 @@ contract ZeroLanceWaveProgram is
         emit WaveFinalized(programId, waveId, 0);
     }
 
-    // ── Claims (backend-driven) ──────────────────────────────────────────
+    // ── Project registration (backend-driven) ────────────────────────────
 
-    function claim(
+    function registerProject(
         uint256 programId,
         uint256 waveId,
-        address who,
-        uint256 amount
-    ) external nonReentrant returns (uint256) {
+        address builder,
+        bytes32 repoHash
+    ) external nonReentrant returns (uint256 projectId) {
+        _onlyOrganizer(programId);
+        _requireWave(waveId, programId);
+        if (builder == address(0)) revert ZeroAddress();
+
+        Storage storage $ = _getStorage();
+        projectId = $.nextProjectId++;
+
+        $.projects[projectId] = Project({
+            programId: programId,
+            waveId: waveId,
+            builder: builder,
+            repoHash: repoHash,
+            points: 0,
+            claimed: false
+        });
+        $.projectWave[projectId] = waveId;
+
+        emit ProjectRegistered(programId, waveId, projectId, builder, repoHash);
+    }
+
+    function setProjectPoints(uint256 projectId, uint256 points) external {
+        _onlyOrganizer($.projects[projectId].programId);
+        Project storage p = $.projects[projectId];
+        if (p.builder == address(0)) revert ProjectNotFound();
+
+        uint256 oldPoints = p.points;
+        p.points = points;
+
+        // Update wave total and builder totals
+        uint256 waveId = $.projectWave[projectId];
+        $.waveTotalPoints[waveId] += points - oldPoints;
+        $.builderWavePoints[waveId][p.builder] += points - oldPoints;
+
+        emit ProjectPointsSet(projectId, points);
+    }
+
+    // ── Claims (points-based distribution) ──────────────────────────────
+
+    function claim(uint256 programId, uint256 waveId, address who) external nonReentrant returns (uint256) {
         if (who == address(0)) revert ZeroAddress();
-        if (amount == 0) revert InvalidParams();
 
         Wave storage w = _requireWave(waveId, programId);
         if (!w.finalized) revert ZeroBudget();
@@ -142,15 +184,34 @@ contract ZeroLanceWaveProgram is
         Storage storage $ = _getStorage();
         if ($.claimedFinalized[waveId][who]) revert AlreadyClaimed();
 
-        uint256 outstanding = remainingPool(programId);
-        if (amount > outstanding) revert NotEnoughPool();
+        uint256 totalPoints = $.waveTotalPoints[waveId];
+        if (totalPoints == 0) revert ZeroBudget();
+
+        uint256 builderPoints = $.builderWavePoints[waveId][who];
+        if (builderPoints == 0) revert ZeroBudget();
+
+        // Find all projects for this builder in this wave and mark claimed
+        uint256 totalClaimed = 0;
+        for (uint256 pid = 0; pid < $.nextProjectId; pid++) {
+            Project storage p = $.projects[pid];
+            if (p.programId == programId && p.waveId == waveId && p.builder == who && !p.claimed) {
+                p.claimed = true;
+                totalClaimed += p.points;
+            }
+        }
+
+        if (totalClaimed == 0) revert ZeroBudget();
+
+        uint256 waveBudget = remainingPool(programId);
+        uint256 share = (waveBudget * totalClaimed) / totalPoints;
+        if (share == 0) revert ZeroBudget();
 
         $.claimedFinalized[waveId][who] = true;
-        $.totalDistributed += amount;
+        $.totalDistributed += share;
 
-        IERC20($.programs[programId].token).safeTransfer(who, amount);
-        emit WaveClaimed(programId, waveId, who, amount);
-        return amount;
+        IERC20($.programs[programId].token).safeTransfer(who, share);
+        emit WaveClaimed(programId, waveId, who, share);
+        return share;
     }
 
     // ── Views ────────────────────────────────────────────────────────────
@@ -163,7 +224,7 @@ contract ZeroLanceWaveProgram is
 
     function waveBudget(uint256 programId, uint256 waveId) external view returns (uint256) {
         _requireWave(waveId, programId);
-        return 0; // backend-computed; contract only verifies wave exists
+        return remainingPool(programId);
     }
 
     function totalClaimable(uint256 programId, uint256 waveId) external view returns (uint256) {
@@ -173,8 +234,14 @@ contract ZeroLanceWaveProgram is
 
     function claimableShare(uint256 programId, uint256 waveId, address who) external view returns (uint256) {
         _requireWave(waveId, programId);
+        Storage storage $ = _getStorage();
         if ($.claimedFinalized[waveId][who]) return 0;
-        return 0; // backend-computed; contract only verifies eligibility
+        uint256 totalPoints = $.waveTotalPoints[waveId];
+        if (totalPoints == 0) return 0;
+        uint256 builderPoints = $.builderWavePoints[waveId][who];
+        if (builderPoints == 0) return 0;
+        uint256 waveBudget = remainingPool(programId);
+        return (waveBudget * builderPoints) / totalPoints;
     }
 
     function claimed(uint256 programId, uint256 waveId, address who) external view returns (bool) {
@@ -189,6 +256,32 @@ contract ZeroLanceWaveProgram is
     function wave(uint256 waveId) external view returns (Wave memory) {
         _requireWave(waveId, $.programOfWave[waveId]);
         return $.waves[waveId];
+    }
+
+    function project(uint256 projectId) external view returns (Project memory) {
+        Storage storage $ = _getStorage();
+        Project memory p = $.projects[projectId];
+        if (p.builder == address(0)) revert ProjectNotFound();
+        return p;
+    }
+
+    function waveProjects(uint256 programId, uint256 waveId) external view returns (Project[] memory) {
+        _requireWave(waveId, programId);
+        Storage storage $ = _getStorage();
+        uint256 count = 0;
+        for (uint256 i = 0; i < $.nextProjectId; i++) {
+            if ($.projects[i].programId == programId && $.projects[i].waveId == waveId) {
+                count++;
+            }
+        }
+        Project[] memory result = new Project[](count);
+        uint256 idx = 0;
+        for (uint256 i = 0; i < $.nextProjectId; i++) {
+            if ($.projects[i].programId == programId && $.projects[i].waveId == waveId) {
+                result[idx++] = $.projects[i];
+            }
+        }
+        return result;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
@@ -221,4 +314,6 @@ contract ZeroLanceWaveProgram is
 
     event PauseProposed(uint256 effectiveAt);
     event EmergencyWithdrawn(uint256 indexed programId, address indexed to, uint256 amount);
+    event ProjectRegistered(uint256 indexed programId, uint256 indexed waveId, uint256 indexed projectId, address indexed builder, bytes32 repoHash);
+    event ProjectPointsSet(uint256 indexed projectId, uint256 points);
 }

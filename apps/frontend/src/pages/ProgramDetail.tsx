@@ -11,16 +11,8 @@ export interface ProgramMeta {
   programId: string;
   token: string;
   organizer: string;
-  genesisPool: string;
-  numWaves: string;
-  buildWindow: string;
-  evalWindow: string;
-  complimentWindow: string;
-  budgetMethod: string;
-  feeBps: string;
   treasury: string;
-  currentWave: string;
-  waveSeq: string;
+  feeBps: string;
   initialized: boolean;
   remainingPool?: string;
   waveBudget?: string;
@@ -97,7 +89,7 @@ export default function ProgramDetail() {
         setMeta({ ...progRes.program, ...metaRes } as ProgramMeta);
         setBuilders(buildersRes.builders ?? []);
         setProjects(projectsRes.projects ?? []);
-        const current = Number(progRes.program.currentWave ?? 0);
+        const current = Number((progRes.program as any).currentWave ?? 0);
         const wavePromises: Promise<WaveInfo>[] = [];
         for (let i = 0; i <= current; i++) {
           wavePromises.push(
@@ -207,13 +199,7 @@ export default function ProgramDetail() {
               <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Organizer</span><div style={{ marginTop: 4 }}><Address value={meta.organizer} /></div></div>
               <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Token</span><div style={{ marginTop: 4 }}><Address value={meta.token} /></div></div>
               <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Treasury</span><div style={{ marginTop: 4 }}><Address value={meta.treasury} /></div></div>
-              <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Budget Method</span><div style={{ marginTop: 4 }}>{meta.budgetMethod}</div></div>
               <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Fee (bps)</span><div style={{ marginTop: 4 }}>{meta.feeBps}</div></div>
-              <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Num Waves</span><div style={{ marginTop: 4 }}>{meta.numWaves}</div></div>
-              <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Build Window</span><div style={{ marginTop: 4 }}>{meta.buildWindow}s</div></div>
-              <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Eval Window</span><div style={{ marginTop: 4 }}>{meta.evalWindow}s</div></div>
-              <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Compliment Window</span><div style={{ marginTop: 4 }}>{meta.complimentWindow}s</div></div>
-              <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Current Wave</span><div style={{ marginTop: 4 }}>#{meta.currentWave}</div></div>
               {meta.remainingPool !== undefined && (
                 <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Remaining Pool</span><div style={{ marginTop: 4 }}><Money value={meta.remainingPool} token="USDC" /></div></div>
               )}
@@ -253,7 +239,7 @@ export default function ProgramDetail() {
                       <Button size="sm" variant="ghost" disabled={!!actionLoading} onClick={() => handleWaveAction("open-evaluation", i)}>Open Eval</Button>
                       <Button size="sm" variant="ghost" disabled={!!actionLoading} onClick={() => handleWaveAction("close-evaluation", i)}>Close Eval</Button>
                       <Button size="sm" variant="ghost" disabled={!!actionLoading} onClick={() => handleWaveAction("finalize", i)}>Finalize</Button>
-                      {Number(meta?.currentWave) === i && !w.finalized && (
+                      {!(w as any).finalized && i === 0 && (
                         <Button size="sm" disabled={!!actionLoading} onClick={() => handleWaveAction("claim", i)}>Claim</Button>
                       )}
                     </div>

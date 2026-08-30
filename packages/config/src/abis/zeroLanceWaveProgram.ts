@@ -33,159 +33,6 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
   },
   {
     "type": "function",
-    "name": "approveRepo",
-    "inputs": [
-      {
-        "name": "programId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "repoHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "allowed",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "approved",
-    "inputs": [
-      {
-        "name": "programId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "repoHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "awardBase",
-    "inputs": [
-      {
-        "name": "programId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "waveId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "contributor",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "points",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "refHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "awardCommunity",
-    "inputs": [
-      {
-        "name": "programId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "waveId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "contributor",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "points",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "refHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "awardCompliment",
-    "inputs": [
-      {
-        "name": "programId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "waveId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "contributor",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "points",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "refHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "cancelPause",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "claim",
     "inputs": [
       {
@@ -197,11 +44,16 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
         "name": "waveId",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "who",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [
       {
-        "name": "amount",
+        "name": "",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -268,24 +120,6 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
   },
   {
     "type": "function",
-    "name": "closeEvaluation",
-    "inputs": [
-      {
-        "name": "programId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "waveId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "closeWave",
     "inputs": [
       {
@@ -312,34 +146,9 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
         "internalType": "address"
       },
       {
-        "name": "genesisPool_",
+        "name": "genesisPool",
         "type": "uint256",
         "internalType": "uint256"
-      },
-      {
-        "name": "numWaves",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "buildWindow",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "evalWindow",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "complimentWindow",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "budgetMethod",
-        "type": "uint8",
-        "internalType": "enum IZeroLanceWaveProgram.BudgetMethod"
       },
       {
         "name": "feeBps",
@@ -350,11 +159,6 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
         "name": "treasury",
         "type": "address",
         "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
       }
     ],
     "outputs": [
@@ -404,13 +208,6 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
   },
   {
     "type": "function",
-    "name": "executePause",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "finalizeWave",
     "inputs": [
       {
@@ -429,53 +226,12 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
   },
   {
     "type": "function",
-    "name": "grantAwarder",
-    "inputs": [
-      {
-        "name": "programId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "awarder",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "allowed",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "initialize",
     "inputs": [
       {
         "name": "admin",
         "type": "address",
         "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "openEvaluation",
-    "inputs": [
-      {
-        "name": "programId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "waveId",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "outputs": [],
@@ -528,25 +284,6 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
   },
   {
     "type": "function",
-    "name": "pointsLedger",
-    "inputs": [
-      {
-        "name": "programId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract IPointsLedger"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "program",
     "inputs": [
       {
@@ -572,59 +309,14 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
             "internalType": "address"
           },
           {
-            "name": "genesisPool",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "numWaves",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "buildWindow",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "evalWindow",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "complimentWindow",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "budgetMethod",
-            "type": "uint8",
-            "internalType": "enum IZeroLanceWaveProgram.BudgetMethod"
-          },
-          {
-            "name": "feeBps",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
             "name": "treasury",
             "type": "address",
             "internalType": "address"
           },
           {
-            "name": "points",
-            "type": "address",
-            "internalType": "contract IPointsLedger"
-          },
-          {
-            "name": "currentWave",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "waveSeq",
-            "type": "uint256",
-            "internalType": "uint256"
+            "name": "feeBps",
+            "type": "uint16",
+            "internalType": "uint16"
           },
           {
             "name": "initialized",
@@ -638,23 +330,88 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
   },
   {
     "type": "function",
-    "name": "proposePause",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "proxiableUUID",
-    "inputs": [],
+    "name": "project",
+    "inputs": [
+      {
+        "name": "projectId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
     "outputs": [
       {
         "name": "",
+        "type": "tuple",
+        "internalType": "struct IZeroLanceWaveProgram.Project",
+        "components": [
+          {
+            "name": "programId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "waveId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "builder",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "repoHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "points",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "claimed",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "registerProject",
+    "inputs": [
+      {
+        "name": "programId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "waveId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "builder",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "repoHash",
         "type": "bytes32",
         "internalType": "bytes32"
       }
     ],
-    "stateMutability": "view"
+    "outputs": [
+      {
+        "name": "projectId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -677,8 +434,19 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
   },
   {
     "type": "function",
-    "name": "renounceOwnership",
-    "inputs": [],
+    "name": "setProjectPoints",
+    "inputs": [
+      {
+        "name": "projectId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "points",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -708,37 +476,6 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
   },
   {
     "type": "function",
-    "name": "transferOwnership",
-    "inputs": [
-      {
-        "name": "newOwner",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "upgradeToAndCall",
-    "inputs": [
-      {
-        "name": "newImplementation",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
     "name": "wave",
     "inputs": [
       {
@@ -762,31 +499,6 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
             "name": "status",
             "type": "uint8",
             "internalType": "enum IZeroLanceWaveProgram.WaveStatus"
-          },
-          {
-            "name": "buildEndAt",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "evalEndAt",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "complimentEndAt",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "budget",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "totalDistributed",
-            "type": "uint256",
-            "internalType": "uint256"
           },
           {
             "name": "finalized",
@@ -818,6 +530,62 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "waveProjects",
+    "inputs": [
+      {
+        "name": "programId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "waveId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple[]",
+        "internalType": "struct IZeroLanceWaveProgram.Project[]",
+        "components": [
+          {
+            "name": "programId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "waveId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "builder",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "repoHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "points",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "claimed",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
       }
     ],
     "stateMutability": "view"
@@ -995,7 +763,26 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
   },
   {
     "type": "event",
-    "name": "RepoApprovalChanged",
+    "name": "ProjectPointsSet",
+    "inputs": [
+      {
+        "name": "projectId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "points",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProjectRegistered",
     "inputs": [
       {
         "name": "programId",
@@ -1004,16 +791,28 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
         "internalType": "uint256"
       },
       {
-        "name": "repoHash",
-        "type": "bytes32",
+        "name": "waveId",
+        "type": "uint256",
         "indexed": true,
-        "internalType": "bytes32"
+        "internalType": "uint256"
       },
       {
-        "name": "allowed",
-        "type": "bool",
+        "name": "projectId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "builder",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "repoHash",
+        "type": "bytes32",
         "indexed": false,
-        "internalType": "bool"
+        "internalType": "bytes32"
       }
     ],
     "anonymous": false
@@ -1272,7 +1071,7 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
   },
   {
     "type": "error",
-    "name": "ProgramNotFound",
+    "name": "ProjectNotFound",
     "inputs": []
   },
   {
@@ -1294,11 +1093,6 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
   {
     "type": "error",
     "name": "UUPSUnauthorizedCallContext",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "UUPSUnsupportedProxiableUUID",
     "inputs": [
       {
         "name": "slot",
@@ -1310,32 +1104,6 @@ export const ZEROLANCE_WAVE_PROGRAM_ABI = [
   {
     "type": "error",
     "name": "WaveNotFound",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "WrongStatus",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "uint8",
-        "internalType": "enum IZeroLanceWaveProgram.WaveStatus"
-      },
-      {
-        "name": "actual",
-        "type": "uint8",
-        "internalType": "enum IZeroLanceWaveProgram.WaveStatus"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ZeroAddress",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "ZeroBudget",
     "inputs": []
   }
 ] as const;
