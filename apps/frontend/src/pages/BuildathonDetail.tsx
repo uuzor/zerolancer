@@ -10,16 +10,8 @@ export interface ProgramMeta {
   programId: string;
   token: string;
   organizer: string;
-  genesisPool: string;
-  numWaves: string;
-  buildWindow: string;
-  evalWindow: string;
-  complimentWindow: string;
-  budgetMethod: string;
-  feeBps: string;
   treasury: string;
-  currentWave: string;
-  waveSeq: string;
+  feeBps: string;
   initialized: boolean;
 }
 
@@ -106,9 +98,7 @@ export default function BuildathonDetail() {
               <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Organizer</span><div style={{ marginTop: 4 }}><Address value={meta.organizer} /></div></div>
               <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Token</span><div style={{ marginTop: 4 }}><Address value={meta.token} /></div></div>
               <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Treasury</span><div style={{ marginTop: 4 }}><Address value={meta.treasury} /></div></div>
-              <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Num Waves</span><div style={{ marginTop: 4 }}>{meta.numWaves}</div></div>
-              <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Budget Method</span><div style={{ marginTop: 4 }}>{meta.budgetMethod}</div></div>
-              <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Current Wave</span><div style={{ marginTop: 4 }}>#{meta.currentWave}</div></div>
+              <div><span style={{ color: "var(--color-graphite)", fontSize: 14 }}>Fee (bps)</span><div style={{ marginTop: 4 }}>{meta.feeBps}</div></div>
             </div>
           </div>
         )}

@@ -156,16 +156,12 @@ export async function createApp(env: BackendEnv): Promise<{
     );
   }
 
-  // Wave funding stack (optional until the contracts are deployed).
+  // Wave funding stack (optional until the contract is deployed).
   let waveClient: WaveClient | null = null;
   const waveProgram = env.ZERO_WAVE_PROGRAM_ADDRESS as `0x${string}` | undefined;
-  const waveIssue = env.ZERO_WAVE_ISSUE_ADDRESS as `0x${string}` | undefined;
-  const waveBuildathon = env.ZERO_WAVE_BUILDATHON_ADDRESS as `0x${string}` | undefined;
-  if (waveProgram && waveIssue && waveBuildathon) {
+  if (waveProgram) {
     waveClient = new WaveClient({
       waveProgramAddress: waveProgram,
-      waveIssueAddress: waveIssue,
-      waveBuildathonAddress: waveBuildathon,
       provider,
       signer,
     });

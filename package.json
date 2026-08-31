@@ -11,6 +11,7 @@
   },
   "packageManager": "pnpm@10.22.0",
   "scripts": {
+    "postinstall": "node scripts/fix-symlinks.mjs",
     "build": "pnpm --filter @zerolance/config build && pnpm --filter @zerolance/oracle build && pnpm --filter @zerolance/backend build",
     "build:all": "pnpm build && pnpm --filter @zerolance/frontend build",
     "start": "node apps/backend/dist/index.js",

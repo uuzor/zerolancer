@@ -16,6 +16,11 @@ import TaskReputation from "./pages/TaskReputation.js";
 import Programs from "./pages/Programs.js";
 import ProgramDetail from "./pages/ProgramDetail.js";
 import WaveProgramCreate from "./pages/WaveProgramCreate.js";
+import WaveProjects from "./pages/WaveProjects.js";
+import ProjectDetail from "./pages/ProjectDetail.js";
+import WaveApply from "./pages/WaveApply.js";
+import WaveSubmit from "./pages/WaveSubmit.js";
+import WaveAward from "./pages/WaveAward.js";
 import Issues from "./pages/Issues.js";
 import IssueDetail from "./pages/IssueDetail.js";
 import IssueCreate from "./pages/IssueCreate.js";
@@ -26,6 +31,7 @@ import ReputationDetail from "./pages/ReputationDetail.js";
 import Disputes from "./pages/Disputes.js";
 import DisputeDetail from "./pages/DisputeDetail.js";
 import Github from "./pages/Github.js";
+import GithubConnected from "./pages/GithubConnected.js";
 import Settings from "./pages/Settings.js";
 import MyTasks from "./pages/MyTasks.js";
 
@@ -53,6 +59,12 @@ export function AppRoutes() {
       <Route path="/programs" element={<Programs />} />
       <Route path="/programs/new" element={<WaveProgramCreate />} />
       <Route path="/programs/:programId" element={<ProgramDetail />} />
+      <Route path="/programs/:programId/projects" element={<WaveProjects />} />
+      <Route path="/programs/:programId/waves/:waveId/projects" element={<WaveProjects />} />
+      <Route path="/programs/:programId/apply" element={<WaveApply />} />
+      <Route path="/programs/:programId/waves/:waveId/submit" element={<WaveSubmit />} />
+      <Route path="/programs/:programId/waves/:waveId/award" element={<WaveAward />} />
+      <Route path="/project/:projectId" element={<ProjectDetail />} />
       {hasWave && <Route path="/issues" element={<Issues />} />}
       {hasWave && <Route path="/issues/new" element={<IssueCreate />} />}
       {hasWave && <Route path="/issues/:issueId" element={<IssueDetail />} />}
@@ -65,6 +77,7 @@ export function AppRoutes() {
       <Route path="/disputes" element={<Disputes />} />
       <Route path="/disputes/:taskId" element={<DisputeDetail />} />
       <Route path="/github" element={<Github />} />
+      <Route path="/github/connected" element={<GithubConnected />} />
       <Route path="/settings" element={<Settings />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
