@@ -251,11 +251,14 @@ Each flow below lists: **trigger → pages touched → API calls → on-chain ca
    - AI scorer (0G compute; may 401 if no credits — UI must show "AI unavailable, CI passed" as soft-fail).
    - Oracle EIP-712 signs the `Verdict` struct.
    - Returns `{ verdict, verification: { score, reason, artifacts }, signer }`.
-10. **Submit verdict** — `POST /v1/verification/submit` (backend signs and broadcasts `EscrowVault.submitVerdict`). Server-key only; the frontend just triggers it and shows tx status.
+10. **Submit verdict** — `POST /v1/verification/submit` (backend signs and broadcasts `TaskVerifier.submitVerdict`). Server-key only; the frontend just triggers it and shows tx status.
 11. If `verdict.passed === true`:
     - `Released` event fires; status → `Passed`.
-    - Escrow automatically pays `freelancer = reward * (1 - feeBps/10000)`, `treasury = reward * feeBps/10000`.
-    - `ReputationMinted` event fires (escrow is `MINTER_ROLE` on `ReputationNFT`).
+    - `TaskVerifier` calls `TaskEscrow.release(taskId, freelancer, feeBps, treasury)`
+      which pays `freelancer = reward * (1 - feeBps/10000)`,
+      `treasury = reward * feeBps/10000`.
+    - `ReputationMinted` event fires (TaskVerifier is `MINTER_ROLE` on
+      `ReputationNFT`).
 12. If `verdict.passed === false`:
     - Status → `Disputed`, `verdictFailed = true`, 14-day retry window starts.
     - Builder may resubmit during the window → re-runs Flow B + verification.
@@ -323,25 +326,57 @@ Each flow below lists: **trigger → pages touched → API calls → on-chain ca
    - `feeBps` (0–10000, paid to `treasury`).
    - `treasury` address.
    - `specHash` (uploaded program spec to 0G Storage first).
-2. Approve USDC, then `POST /v1/wave/program/:id/deposit` (signer-gated; backend signs and broadcasts `depositPool`).
+   - Calls `POST /v1/wave/program/create` (signer-gated; backend signs and
+     broadcasts `WaveFundingVerifier.createWaveProgram`). Response includes
+     `programId`.
+2. Approve USDC to the **WaveFundingEscrow** (not the verifier), then
+   `POST /v1/wave/program/:id/deposit` (signer-gated; backend signs and
+   broadcasts `WaveFundingVerifier.depositPool` which pulls tokens into the
+   escrow and increments `pooled[programId]`).
 3. **/programs/:programId** — organizer dashboard with tabs:
-   - **Overview** — `GET /v1/wave/program/:id/meta` (remainingPool, waveBudget, totalPoints).
-   - **Waves** — list with `WaveStatus` per wave.
-   - **Awarders** — `POST /v1/wave/program/:id/awarder` (`grantAwarder`) to whitelist points awarders.
+   - **Overview** — `GET /v1/wave/program/:id/meta` (remainingPool, waveBudget, totalPoints, `waveCount`).
+   - **Waves** — list with `WaveStatus` per wave (from
+     `GET /v1/wave/program/:id/wave/:waveId`).
+   - **Awarders** — `POST /v1/wave/program/:id/awarder { wallet, allowed: true|false }`
+     (signer-gated; calls `WaveFundingVerifier.grantAwarder`).
    - **Pool** — additional `deposit` for top-ups.
-4. **Open a wave** — `POST /v1/wave/program/:id/open-wave` (signer-gated; returns `waveId`).
+4. **Open a wave** — `POST /v1/wave/program/:id/open-wave` (signer-gated; returns
+   `waveId` from `WaveFundingVerifier.openWave`).
 5. During `Open` + `Evaluation`:
-   - Awarders call `program.awardBase / awardCompliment / awardCommunity` directly (or via the backend if exposed). Each routes to the per-program `PointsLedger`.
-6. **Close wave** — `POST /v1/wave/program/:id/open-wave` then `closeWave` / `openEvaluation` (organizer-only on-chain; backend exposes these as signer-gated — or organizer wallet calls directly). `PointsLedger.freezeWave(waveId)` runs at `closeEvaluation`.
-7. **Finalize** — `POST /v1/wave/program/:id/finalize { waveId }` → computes budget (`min(genesisPool/numWaves, remainingPool)` or `remainingPool/(numWaves - (waveSeq-1))`), sets `finalizedWaveBudget = budget * (10000-feeBps)/10000`.
-8. **Claim** — contributor calls `POST /v1/wave/program/:id/claim { waveId }` → pays `share = (netBudget * contributorPoints) / totalPoints` (dust-capped to `netBudget - totalDistributed`).
-9. Repeat for each wave until `waveSeq === numWaves`. Then `Program.remainingPool` is the leftover (re-usable for later programs by the same organizer is not a feature; leftover is the organizer's to `emergencyWithdraw`).
+   - Awarders call `WaveFundingVerifier.awardBase / awardCompliment / awardCommunity`
+     directly (or via the backend if exposed). Each writes to the per-program
+     `PointsLedger` (the verifier is the operator).
+   - `WaveFundingEscrow` holds the USDC; only the verifier can pull from it.
+7. **Close wave** — `POST /v1/wave/program/:id/close-wave` (organizer-only;
+   signer-gated; `WaveFundingVerifier.closeWave` transitions Open → Evaluation).
+   `POST /v1/wave/program/:id/close-evaluation` runs after the eval window
+   (calls `closeEvaluation` → freezes the `PointsLedger` for that wave).
+8. **Finalize** — `POST /v1/wave/program/:id/finalize { waveId }` →
+   `WaveFundingVerifier.finalizeWave` computes budget
+   (`FixedPerWave`: `genesisPool / numWaves`;
+   `PctOfRemaining`: `remainingPool / (numWaves - waveSeq + 1)`),
+   sets `netBudget = budget * (10000-feeBps)/10000`, and tells the escrow
+   to `setWaveBudget(programId, waveId, netBudget)`.
+9. **Claim** — contributor calls `POST /v1/wave/program/:id/claim { waveId }`.
+   The backend derives `who = msg.sender`, calls
+   `WaveFundingVerifier.claim(programId, waveId)`, which in turn calls
+   `WaveFundingEscrow.claim(programId, waveId, msg.sender, share)` where
+   `share = (netBudget * contributorPoints) / totalPoints` (dust-capped to
+   `netBudget - totalDistributed`). The contributor's wallet signs the
+   transaction directly (or the backend relays via its signer when
+   `authPrincipal === "server"`).
+10. Repeat for each wave until `waveSeq === numWaves`. Then `closeProgram`
+    may be called by the organizer to retrieve any leftover via
+    `WaveFundingEscrow.emergencyWithdraw(programId, amount, organizer)`.
 
 #### Failure modes
 - **Pool not seeded** — `openWave` reverts `NotEnoughPool`.
 - **Wave frozen** — any subsequent `award*` reverts `WaveFrozen`.
 - **Already claimed** — `claim` reverts `AlreadyClaimed`.
-- **Budget = 0** — `finalizeWave` reverts `ZeroBudget`; UI must warn when `remainingPool` is 0 before finalizing.
+- **Budget = 0** — `finalizeWave` reverts `ZeroBudget`; UI must warn when
+  `remainingPool` is 0 before finalizing.
+- **Backend not configured** — `503 WAVE_NOT_CONFIGURED` when the verifier or
+  escrow env var is unset; hide the entire `/programs` nav.
 
 ---
 
@@ -352,34 +387,53 @@ Each flow below lists: **trigger → pages touched → API calls → on-chain ca
 
 #### Step-by-step
 1. Ensure the program exists (Flow C). Note `programId`.
-2. **Accept repo** — backend route is `POST` (or direct call) to `WaveIssue.acceptRepo(programId, repoHash, true)`. The frontend computes `repoHash = keccak256(owner/repo)` (deterministic) and submits on-chain.
+2. **Accept repo** — `POST /v1/wave/oss/accept-repo { programId, repoUrl, allowed: true }`
+   (signer-gated; backend signs and broadcasts `ZeroLanceOssWave.acceptRepo(programId, repoHash, allowed)`).
+   The frontend computes `repoHash = keccak256(bytes(repoUrl))` and stores the
+   full `repoUrl` string alongside the hash. The contract accepts the hash;
+   the frontend keeps the canonical URL for display.
 3. **/issues/new** form:
    - `programId` (auto-filled from accepted repo's program).
-   - `repo` (must be accepted).
-   - Title, body (Markdown), labels, base points (1–200), complexity (1=trivial, 2=medium, 3=high).
+   - `repoUrl` (must be accepted; the contract compares hashes).
+   - Title, body (Markdown), labels, base points (1–200), complexity
+     (1=trivial, 2=medium, 3=high).
    - Optional: create a real GitHub issue via `POST /v1/github/issues/create` and link it.
-4. `POST /v1/wave/issue/...`-equivalent (currently exposed as `GET /v1/wave/issue/:id` read-only; **writes are signer-gated via the WaveClient** — frontend should call the contract via wagmi using `WaveIssue` ABI from `packages/config/src/abis/zeroLanceWaveIssue.ts`).
+4. `POST /v1/wave/oss/issue` (signer-gated; backend signs
+   `ZeroLanceOssWave.createIssue(programId, repoHash, specHash, basePoints, complexity)`)
+   → returns `issueId`. The contract enforces `basePoints <= 200` and `state == Created`.
 5. Builder flow: **/issues/:issueId/claim**:
-   - Requires `state === Created` and an open wave in the program.
-   - Calls `WaveIssue.claimIssue(issueId)` (wagmi write).
+   - Requires `state === Created` and an open wave in the program
+     (verifier check; see `WaveFundingVerifier.openWave`).
+   - Calls `ZeroLanceOssWave.claimIssue(issueId)` (wagmi write or backend-relayed).
    - `IssueClaimed` event; `state → Claimed`.
 6. Builder **/issues/:issueId/submit**:
    - `deliverableHash` (PR URL hash), `prNumber`.
-   - Calls `WaveIssue.submitPr(issueId, deliverableHash, prNumber)`.
+   - Calls `ZeroLanceOssWave.submitPr(issueId, deliverableHash, prNumber)`.
    - `IssuePrSubmitted` event; `state → PrSubmitted`.
 7. Maintainer **/issues/:issueId/award**:
    - View PR (linked via `POST /v1/github/task/:id/pr` if not yet linked).
-   - Click "Merge confirmed" → `WaveIssue.confirmMerge(issueId)` awards `basePoints + bonusPoints` via `program.awardBase`.
+   - Click "Merge confirmed" → `POST /v1/wave/oss/confirm-merge { issueId }`
+     (signer-gated; backend signs `ZeroLanceOssWave.confirmMerge(issueId)`)
+     which routes to `WaveFundingVerifier.awardBase(waveId, builder, basePoints, refHash)`.
    - `IssueMerged` event; `state → Awarded`.
-8. Maintainer may add compliments anytime after merge: `WaveIssue.addCompliment(issueId, points)` — routes to `program.awardCompliment`.
-9. **/issues/:issueId/award** has a "Close" button when state should move to `Closed` (admin/manager only).
-10. After wave evaluation closes, builder claims USDC as in Flow C step 8.
+8. Maintainer may add compliments anytime after merge:
+   `POST /v1/wave/oss/compliment { issueId, points }` → backend signs
+   `ZeroLanceOssWave.addCompliment(issueId, points)` → routes to
+   `WaveFundingVerifier.awardCompliment(...)`.
+9. **/issues/:issueId/award** has a "Close" button when state should move to
+   `Closed` (maintainer/manager only).
+10. After wave evaluation closes and the wave is finalized, the builder
+    claims their share via Flow C step 9 (`POST /v1/wave/program/:id/claim`).
+    The `PointsLedger` is frozen at `closeEvaluation` and the escrow budget
+    is locked at `finalizeWave`.
 
 #### Failure modes
 - **Repo not accepted** — `createIssue` reverts `RepoNotAccepted`.
-- **Base points > 200** — reverts `InvalidPoints`.
-- **No wave open** — `claimIssue` reverts `NoWaveOpen`.
+- **Base points > 200** — reverts `InvalidPoints` (cap of 200).
+- **No wave open** — `claimIssue` reverts `NoWaveOpen` (verifier check).
 - **Builder ≠ claimer** — `submitPr` reverts `NotBuilder`.
+- **Backend not configured** — `503 WAVE_NOT_CONFIGURED` when the OSS Wave
+  env var is unset; hide `/issues` nav.
 
 ---
 
@@ -425,7 +479,8 @@ Each flow below lists: **trigger → pages touched → API calls → on-chain ca
 5. Each arbiter calls `POST /v1/disputes/vote { taskId, choice: "Client" | "Freelancer" | "Abstain" }`.
 6. Once `clientVotes + freelancerVotes + abstainVotes >= quorum`:
    - `DisputeResolved` event with `winner`.
-   - Backend's `EscrowVault.resolveDispute(taskId, winner)` runs (called by `Arbitration`).
+   - Backend's `TaskVerifier.submitVerdict` (or `Arbitration` directly)
+     drives `ZeroLanceTaskEscrow.resolveDispute(taskId, winner)`.
    - Full escrow (no fee) transfers to winner.
    - Status → `Resolved`.
 7. Winners get reputation NFT (escrow auto-mints via the same path as a normal pass).
@@ -640,8 +695,14 @@ Each page entry below lists: **route, persona, layout, data sources, key actions
 - `LiveBadge` component wraps any entity (task, wave, NFT) to pulse on relevant events.
 
 ### 9.5 Feature flags
-- `waveClient === null` (env unset) → hide `/programs`, `/buildathons`, `/issues` new flows; show "Wave funding not deployed here" notice.
-- `storageBackend === "in-memory"` → add a yellow banner on any 0G Storage upload ("Local-only; not persisted on testnet").
+- Any of `ZERO_WAVE_ESCROW_ADDRESS` / `ZERO_WAVE_VERIFIER_ADDRESS` /
+  `ZERO_OSS_WAVE_ADDRESS` / `ZERO_BUILDATHON_WAVE_ADDRESS` unset → the
+  corresponding `Wave*Client` is `null`; hide `/programs`, `/buildathons`,
+  `/issues` new flows; show "Wave funding not deployed here" notice. The
+  router returns `503 WAVE_NOT_CONFIGURED` for any wave write while clients
+  are missing.
+- `storageBackend === "in-memory"` → add a yellow banner on any 0G Storage
+  upload ("Local-only; not persisted on testnet").
 - `ZERO_DISABLE_AUTH=true` → show "Dev mode — auth disabled" banner.
 
 ### 9.6 Permissions matrix (UI-level)
@@ -654,7 +715,7 @@ Each page entry below lists: **route, persona, layout, data sources, key actions
 | Trigger verify | Anyone |
 | Escalate dispute | Task client, after 14d |
 | Vote in dispute | Listed arbiter (staked NFT, not slashed, hasn't voted) |
-| Mint reputation | Escrow (auto) |
+| Mint reputation | TaskVerifier (auto on pass) |
 | Stake/unstake badge | NFT owner / address with stake |
 | Create program | Anyone with USDC |
 | Open/finalize wave | Program organizer |
@@ -686,19 +747,20 @@ Frontend ↔ backend endpoints used per flow:
 |---|---|
 | A — Post task | `POST /v1/tasks/create`, `POST /v1/escrow/approve`, `POST /v1/escrow/deposit`, `POST /v1/tasks/assign`, `POST /v1/github/connect`, `POST /v1/verification/verify`, `POST /v1/verification/submit`, `GET /v1/escrow/:id` |
 | B — Builder | `GET /v1/github/task/:id/repo`, `POST /v1/github/task/:id/pr`, `POST /v1/tasks/submit`, `POST /v1/verification/verify`, `POST /v1/reputation/mint` (auto via escrow; fallback call) |
-| C — Wave program | `POST /v1/storage/upload-json`, `POST /v1/wave/program/:id/deposit`, `POST /v1/wave/program/:id/open-wave`, `POST /v1/wave/program/:id/finalize`, `POST /v1/wave/program/:id/claim`, `GET /v1/wave/program/:id/meta`, `GET /v1/wave/program/:id/claimable` |
-| D — Wave issue | `GET /v1/wave/issue/:id`, `POST /v1/github/issues/create` (optional), direct contract writes via wagmi for `acceptRepo`/`createIssue`/`claimIssue`/`submitPr`/`confirmMerge`/`addCompliment` |
+| C — Wave program | `POST /v1/storage/upload-json`, `POST /v1/wave/program/create`, `POST /v1/wave/program/:id/deposit`, `POST /v1/wave/program/:id/open-wave`, `POST /v1/wave/program/:id/close-wave`, `POST /v1/wave/program/:id/close-evaluation`, `POST /v1/wave/program/:id/finalize`, `POST /v1/wave/program/:id/claim`, `POST /v1/wave/program/:id/awarder`, `GET /v1/wave/program/:id/meta`, `GET /v1/wave/program/:id/claimable`, `GET /v1/wave/program/:id/wave-count` |
+| D — Wave issue | `POST /v1/wave/oss/accept-repo`, `POST /v1/wave/oss/issue`, `POST /v1/wave/oss/confirm-merge`, `POST /v1/wave/oss/compliment`, `GET /v1/wave/oss/issue/:id`, `POST /v1/github/issues/create` (optional), direct contract writes via wagmi for `acceptRepo`/`createIssue`/`claimIssue`/`submitPr`/`confirmMerge`/`addCompliment` |
 | E — Buildathon | `GET /v1/wave/buildathon/submission/:id`, direct contract writes via wagmi for `registerTeam`/`submit`/`setSubmissionPoints`/`castVote`/`setJudge` |
 | F — Dispute | `POST /v1/disputes/escalate`, `POST /v1/disputes/vote`, `GET /v1/disputes/:id` |
 | G — Reputation | `GET /v1/reputation/:id`, direct contract reads via wagmi (`isVerified`, `stakeOf`, `intelligentDatasOf`), `ReputationNFT` writes via wagmi for `stakeVerifiedBadge`/`unstakeVerifiedBadge`/`appendPortfolio`/`iTransferFrom` |
 | Global | `GET /v1/config`, `GET /health`, `GET /v1/events`, `GET /v1/storage/status`, `GET /v1/da/summary`, `POST /v1/storage/upload-json` |
 
 ### Direct contract writes (wagmi, no backend)
-- All `WaveIssue` writes (Flow D) — ABI in `packages/config/src/abis/zeroLanceWaveIssue.ts`.
-- All `WaveBuildathon` writes (Flow E) — ABI in `packages/config/src/abis/zeroLanceWaveBuildathon.ts`.
+- All `ZeroLanceOssWave` writes (Flow D) — ABI in `packages/config/src/abis/zeroLanceOssWave.ts`.
+- All `ZeroLanceBuildathonWave` writes (Flow E) — ABI in `packages/config/src/abis/zeroLanceBuildathonWave.ts`.
+- All `WaveFundingVerifier` writes (Flow C — awardBase/awardCompliment/awardCommunity, grantAwarder).
 - All `ReputationNFT` writes (Flow G) — ABI in `packages/config/src/abis/zeroLanceReputationNFT.ts`.
 - ERC20 `approve` / `transfer` for USDC and ZERO.
-- All reads that backend doesn't proxy (e.g. `taskOf`, `escrowedOf`, `isVerified`, `claimableShare`, `program()`, `wave()`, `issue()`, `submission()`).
+- All reads that backend doesn't proxy (e.g. `taskOf`, `escrowedOf`, `isVerified`, `claimableShare`, `program()`, `wave()`, `issue()`, `submission()`, `WaveFundingEscrow.pooled/distributed/waveBudgetOf`).
 
 ---
 
@@ -710,7 +772,12 @@ These are quirks / gaps observed in the current backend that the frontend should
 2. **`/v1/reputation/stake` ignores `amount`** — backend only encodes `tokenId`; the actual `stakeVerifiedBadge(tokenId)` is a fixed-amount call on the current contract version. Frontend should not show an amount field until this is fixed (or call the contract directly).
 3. **Verification soft-fails** — AI scorer may 401 (no 0G credits) and CI may fail to clone. UI must show soft-fail banner, not block.
 4. **0G Storage may be in-memory** — `GET /v1/storage/status` reveals `backend`. Warn user that uploads won't persist on testnet unless `"0g"`.
-5. **Wave address env vars** — if any of `ZERO_WAVE_PROGRAM_ADDRESS` / `ZERO_WAVE_ISSUE_ADDRESS` / `ZERO_WAVE_BUILDATHON_ADDRESS` is unset, `GET /v1/config` will reflect this. Frontend should hide corresponding nav items.
+5. **Wave address env vars** — if any of
+   `ZERO_WAVE_ESCROW_ADDRESS` / `ZERO_WAVE_VERIFIER_ADDRESS` /
+   `ZERO_OSS_WAVE_ADDRESS` / `ZERO_BUILDATHON_WAVE_ADDRESS` is unset, the
+   corresponding wave client is `null`, the router returns
+   `503 WAVE_NOT_CONFIGURED`, and `/v1/config` will reflect the gap.
+   Frontend should hide the corresponding nav items.
 6. **GitHub auth callback** — the `login` query param is the only signal of success; parse it and store the access token obtained from a follow-up call (the backend currently doesn't return the token in the callback; **need a backend fix** to expose the access token for the browser). Until then, the frontend may need to call a hypothetical `GET /v1/github/session` after callback.
 7. **Dev mode (`ZERO_DISABLE_AUTH=true`)** — show a persistent yellow banner so users don't accidentally test without auth in production.
 8. **`POST /v1/escrow/refund` is unguarded** — the backend doesn't gate refund to escrow owner; the frontend must ensure the connected wallet is the task client.

@@ -16,13 +16,14 @@ import type { InterfaceAbi } from "ethers";
 
 import { HTTP, type AddressName } from "@zerolance/config";
 import {
-  ZEROLANCE_ESCROW_VAULT_ABI,
   ZEROLANCE_TASK_REGISTRY_ABI,
+  ZEROLANCE_TASK_ESCROW_ABI,
   ZEROLANCE_ARBITRATION_ABI,
   ZEROLANCE_REPUTATION_NFT_ABI,
-  ZEROLANCE_WAVE_PROGRAM_ABI,
-  ZEROLANCE_WAVE_ISSUE_ABI,
-  ZEROLANCE_WAVE_BUILDATHON_ABI,
+  WAVE_FUNDING_ESCROW_ABI,
+  WAVE_FUNDING_VERIFIER_ABI,
+  ZEROLANCE_OSS_WAVE_ABI,
+  ZEROLANCE_BUILDATHON_WAVE_ABI,
 } from "@zerolance/config";
 import {
   createApiKeyAuth,
@@ -49,7 +50,7 @@ import { registerDaRoutes } from "./routers/da.js";
 import { attachWebsocket } from "./ws/handler.js";
 import { DefaultOracleClient, type OracleClient } from "./oracle/client.js";
 import { EscrowClient } from "./escrow/client.js";
-import { WaveClient } from "./wave/client.js";
+import { WaveEscrowClient, WaveVerifierClient, OssWaveClient, BuildathonWaveClient } from "./wave/index.js";
 import { StorageService } from "./storage/service.js";
 import { DaPublisher } from "./da/publisher.js";
 import { VerdictOrchestrator } from "./compute/verdict-orchestrator.js";
@@ -71,7 +72,10 @@ export interface ServerConfig {
   oracleClient: OracleClient | null;
   escrowClient: EscrowClient | null;
   verdictOrchestrator: VerdictOrchestrator | null;
-  waveClient: WaveClient | null;
+  waveEscrowClient: WaveEscrowClient | null;
+  waveVerifierClient: WaveVerifierClient | null;
+  ossWaveClient: OssWaveClient | null;
+  buildathonWaveClient: BuildathonWaveClient | null;
   storageService: StorageService;
   daPublisher: DaPublisher | null;
   indexers: Indexer[];
@@ -126,6 +130,7 @@ export async function createApp(env: BackendEnv): Promise<{
   }
 
   let escrowClient: EscrowClient | null = null;
+  const taskVerifierAddr = env.ZERO_TASK_VERIFIER_ADDRESS as `0x${string}` | undefined;
   if (addresses.escrowVault && addresses.taskRegistry && addresses.mockUsdc) {
     escrowClient = new EscrowClient({
       escrowAddress: addresses.escrowVault,
@@ -133,6 +138,7 @@ export async function createApp(env: BackendEnv): Promise<{
       paymentTokenAddress: addresses.mockUsdc,
       provider,
       signer,
+      verifierAddress: taskVerifierAddr,
     });
   }
 
@@ -156,16 +162,50 @@ export async function createApp(env: BackendEnv): Promise<{
     );
   }
 
-  // Wave funding stack (optional until the contract is deployed).
-  let waveClient: WaveClient | null = null;
-  const waveProgram = env.ZERO_WAVE_PROGRAM_ADDRESS as `0x${string}` | undefined;
-  if (waveProgram) {
-    waveClient = new WaveClient({
-      waveProgramAddress: waveProgram,
+  // Wave funding stack — each client is constructed only when its
+  // corresponding address env var is set.
+  let waveEscrowClient: WaveEscrowClient | null = null;
+  const waveEscrowAddr = env.ZERO_WAVE_ESCROW_ADDRESS as `0x${string}` | undefined;
+  if (waveEscrowAddr) {
+    waveEscrowClient = new WaveEscrowClient({
+      escrowAddress: waveEscrowAddr,
       provider,
       signer,
     });
-    log.info("WaveClient configured", { waveProgram });
+    log.info("WaveEscrowClient configured", { escrow: waveEscrowAddr });
+  }
+
+  let waveVerifierClient: WaveVerifierClient | null = null;
+  const waveVerifierAddr = env.ZERO_WAVE_VERIFIER_ADDRESS as `0x${string}` | undefined;
+  if (waveVerifierAddr) {
+    waveVerifierClient = new WaveVerifierClient({
+      verifierAddress: waveVerifierAddr,
+      provider,
+      signer,
+    });
+    log.info("WaveVerifierClient configured", { verifier: waveVerifierAddr });
+  }
+
+  let ossWaveClient: OssWaveClient | null = null;
+  const ossWaveAddr = env.ZERO_OSS_WAVE_ADDRESS as `0x${string}` | undefined;
+  if (ossWaveAddr) {
+    ossWaveClient = new OssWaveClient({
+      ossAddress: ossWaveAddr,
+      provider,
+      signer,
+    });
+    log.info("OssWaveClient configured", { oss: ossWaveAddr });
+  }
+
+  let buildathonWaveClient: BuildathonWaveClient | null = null;
+  const buildathonWaveAddr = env.ZERO_BUILDATHON_WAVE_ADDRESS as `0x${string}` | undefined;
+  if (buildathonWaveAddr) {
+    buildathonWaveClient = new BuildathonWaveClient({
+      buildathonAddress: buildathonWaveAddr,
+      provider,
+      signer,
+    });
+    log.info("BuildathonWaveClient configured", { buildathon: buildathonWaveAddr });
   }
 
   // 0G Storage service for artifact blobs (real 0G when signer + storage RPC set).
@@ -202,7 +242,7 @@ export async function createApp(env: BackendEnv): Promise<{
       },
       {
         address: addresses.escrowVault,
-        abi: [...ZEROLANCE_ESCROW_VAULT_ABI],
+        abi: [...ZEROLANCE_TASK_ESCROW_ABI],
         source: "escrow",
       },
       {
@@ -216,18 +256,23 @@ export async function createApp(env: BackendEnv): Promise<{
         source: "reputation",
       },
       {
-        address: (env.ZERO_WAVE_PROGRAM_ADDRESS as `0x${string}` | undefined),
-        abi: [...ZEROLANCE_WAVE_PROGRAM_ABI],
-        source: "wave-program",
+        address: (env.ZERO_WAVE_ESCROW_ADDRESS as `0x${string}` | undefined),
+        abi: [...WAVE_FUNDING_ESCROW_ABI],
+        source: "wave-escrow",
       },
       {
-        address: (env.ZERO_WAVE_ISSUE_ADDRESS as `0x${string}` | undefined),
-        abi: [...ZEROLANCE_WAVE_ISSUE_ABI],
-        source: "wave-issue",
+        address: (env.ZERO_WAVE_VERIFIER_ADDRESS as `0x${string}` | undefined),
+        abi: [...WAVE_FUNDING_VERIFIER_ABI],
+        source: "wave-verifier",
       },
       {
-        address: (env.ZERO_WAVE_BUILDATHON_ADDRESS as `0x${string}` | undefined),
-        abi: [...ZEROLANCE_WAVE_BUILDATHON_ABI],
+        address: (env.ZERO_OSS_WAVE_ADDRESS as `0x${string}` | undefined),
+        abi: [...ZEROLANCE_OSS_WAVE_ABI],
+        source: "wave-oss",
+      },
+      {
+        address: (env.ZERO_BUILDATHON_WAVE_ADDRESS as `0x${string}` | undefined),
+        abi: [...ZEROLANCE_BUILDATHON_WAVE_ABI],
         source: "wave-buildathon",
       },
     ];
@@ -258,7 +303,10 @@ export async function createApp(env: BackendEnv): Promise<{
     oracleClient,
     escrowClient,
     verdictOrchestrator,
-    waveClient,
+    waveEscrowClient,
+    waveVerifierClient,
+    ossWaveClient,
+    buildathonWaveClient,
     storageService,
     daPublisher,
     indexers,

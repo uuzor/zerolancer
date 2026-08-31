@@ -4,81 +4,118 @@ pragma solidity ^0.8.20;
 import {Script, console} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import {ZeroLanceWaveProgram} from "../src/zerolancewave/ZeroLanceWaveProgram.sol";
-import {ZeroLanceWaveIssue} from "../src/zerolancewave/ZeroLanceWaveIssue.sol";
-import {ZeroLanceWaveBuildathon} from "../src/zerolancewave/ZeroLanceWaveBuildathon.sol";
+import {WaveFundingEscrow} from "../src/zerolancewave/WaveFundingEscrow.sol";
+import {WaveFundingVerifier} from "../src/zerolancewave/WaveFundingVerifier.sol";
+import {ZeroLanceOssWave} from "../src/zerolancewave/ZeroLanceOssWave.sol";
+import {ZeroLanceBuildathonWave} from "../src/zerolancewave/ZeroLanceBuildathonWave.sol";
+import {PointsLedger} from "../src/zerolancewave/PointsLedger.sol";
 
-/// @notice Deploys the ZeroLance wave funding suite (WaveProgram + Issue + Buildathon)
-///         behind UUPS proxies. Grants the mode contracts as awarders on the program so
-///         their points route through. Writes a manifest to
-///         ../../docs/deployments/<network>-wave.json.
+/// @notice Deploys the rewritten ZeroLance wave funding suite: WaveFundingEscrow
+///         (funds-only vault), WaveFundingVerifier (state + rules + points),
+///         ZeroLanceOssWave (OSS issue mode), ZeroLanceBuildathonWave (buildathon
+///         mode), and a shared PointsLedger (non-upgradeable, owned by the
+///         verifier). All four protocol contracts are UUPS-proxied. Writes a
+///         manifest to ../../docs/deployments/<network>-wave.json.
 contract DeployWave is Script {
     struct Addrs {
-        address waveProgram;
-        address waveIssue;
-        address waveBuildathon;
+        address waveFundingEscrow;
+        address waveFundingVerifier;
+        address ossWave;
+        address buildathonWave;
         address pointsLedger;
     }
 
     function run() external returns (Addrs memory a) {
         uint256 pk = vm.envUint("DEPLOYER_PK");
         address admin = vm.addr(pk);
+        address treasury = vm.envOr("ZERO_TREASURY", admin);
 
         vm.startBroadcast(pk);
 
-        ZeroLanceWaveProgram progImpl = new ZeroLanceWaveProgram();
-        ZeroLanceWaveProgram waveProgram = ZeroLanceWaveProgram(
-            address(
-                new ERC1967Proxy(
-                    address(progImpl),
-                    abi.encodeCall(ZeroLanceWaveProgram.initialize, (admin))
-                )
-            )
-        );
+        // 1. Shared points ledger (constructor-style, non-upgradeable).
+        //    The verifier takes ownership so it can assign the wave operator.
+        PointsLedger ledgerImpl = new PointsLedger(admin);
+        address pointsLedger = address(ledgerImpl);
 
-        ZeroLanceWaveIssue wiImpl = new ZeroLanceWaveIssue();
-        ZeroLanceWaveIssue waveIssue = ZeroLanceWaveIssue(
+        // 2. WaveFundingEscrow behind UUPS proxy.
+        WaveFundingEscrow escrowLogic = new WaveFundingEscrow();
+        WaveFundingEscrow waveFundingEscrow = WaveFundingEscrow(
             address(
                 new ERC1967Proxy(
-                    address(wiImpl),
-                    abi.encodeCall(ZeroLanceWaveIssue.initialize, (admin, address(waveProgram)))
-                )
-            )
-        );
-
-        ZeroLanceWaveBuildathon baImpl = new ZeroLanceWaveBuildathon();
-        ZeroLanceWaveBuildathon buildathon = ZeroLanceWaveBuildathon(
-            address(
-                new ERC1967Proxy(
-                    address(baImpl),
+                    address(escrowLogic),
                     abi.encodeCall(
-                        ZeroLanceWaveBuildathon.initialize,
-                        (admin, address(waveProgram))
+                        WaveFundingEscrow.initialize, (admin, treasury, address(0))
                     )
                 )
             )
         );
 
-        // NOTE: awarder grants are per-program (grantAwarder(programId, who, allowed))
-        // and are done by the organizer at runtime, not at deploy time.
+        // 3. WaveFundingVerifier behind UUPS proxy. Pass escrow + ledger addresses.
+        WaveFundingVerifier verifierLogic = new WaveFundingVerifier();
+        WaveFundingVerifier waveFundingVerifier = WaveFundingVerifier(
+            address(
+                new ERC1967Proxy(
+                    address(verifierLogic),
+                    abi.encodeCall(
+                        WaveFundingVerifier.initialize,
+                        (admin, address(waveFundingEscrow), pointsLedger)
+                    )
+                )
+            )
+        );
+
+        // 4. Re-point escrow.verifier to the deployed verifier, and hand the
+        //    ledger's waveOperator over to the verifier.
+        waveFundingEscrow.setVerifier(address(waveFundingVerifier));
+        ledgerImpl.setWaveOperator(address(waveFundingVerifier));
+
+        // 5. ZeroLanceOssWave (OSS issue mode) behind UUPS proxy.
+        ZeroLanceOssWave ossLogic = new ZeroLanceOssWave();
+        ZeroLanceOssWave ossWave = ZeroLanceOssWave(
+            address(
+                new ERC1967Proxy(
+                    address(ossLogic),
+                    abi.encodeCall(
+                        ZeroLanceOssWave.initialize,
+                        (admin, address(waveFundingVerifier))
+                    )
+                )
+            )
+        );
+
+        // 6. ZeroLanceBuildathonWave (buildathon mode) behind UUPS proxy.
+        ZeroLanceBuildathonWave buildathonLogic = new ZeroLanceBuildathonWave();
+        ZeroLanceBuildathonWave buildathonWave = ZeroLanceBuildathonWave(
+            address(
+                new ERC1967Proxy(
+                    address(buildathonLogic),
+                    abi.encodeCall(
+                        ZeroLanceBuildathonWave.initialize,
+                        (admin, address(waveFundingVerifier))
+                    )
+                )
+            )
+        );
 
         vm.stopBroadcast();
 
         a = Addrs({
-            waveProgram: address(waveProgram),
-            waveIssue: address(waveIssue),
-            waveBuildathon: address(buildathon),
-            pointsLedger: address(0)
+            waveFundingEscrow: address(waveFundingEscrow),
+            waveFundingVerifier: address(waveFundingVerifier),
+            ossWave: address(ossWave),
+            buildathonWave: address(buildathonWave),
+            pointsLedger: pointsLedger
         });
 
         _writeManifest(a, admin);
 
         // solhint-disable no-console
         console.log("=== ZeroLance Wave deployed ===");
-        console.log("WaveProgram:   ", a.waveProgram);
-        console.log("WaveIssue:     ", a.waveIssue);
-        console.log("WaveBuildathon:", a.waveBuildathon);
-        console.log("PointsLedger:  ", a.pointsLedger);
+        console.log("WaveFundingEscrow:   ", a.waveFundingEscrow);
+        console.log("WaveFundingVerifier: ", a.waveFundingVerifier);
+        console.log("OssWave:             ", a.ossWave);
+        console.log("BuildathonWave:      ", a.buildathonWave);
+        console.log("PointsLedger:        ", a.pointsLedger);
         // solhint-enable no-console
     }
 
@@ -87,9 +124,10 @@ contract DeployWave is Script {
         string memory json = string.concat(
             '{"network":"', network, '",',
             '"deployer":"', vm.toString(admin), '",',
-            '"waveProgram":"', vm.toString(a.waveProgram), '",',
-            '"waveIssue":"', vm.toString(a.waveIssue), '",',
-            '"waveBuildathon":"', vm.toString(a.waveBuildathon), '",',
+            '"waveFundingEscrow":"', vm.toString(a.waveFundingEscrow), '",',
+            '"waveFundingVerifier":"', vm.toString(a.waveFundingVerifier), '",',
+            '"ossWave":"', vm.toString(a.ossWave), '",',
+            '"buildathonWave":"', vm.toString(a.buildathonWave), '",',
             '"pointsLedger":"', vm.toString(a.pointsLedger), '"}'
         );
         vm.writeFile(string.concat("../../docs/deployments/", network, "-wave.json"), json);

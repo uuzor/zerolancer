@@ -8,7 +8,6 @@ import {ReentrancyGuardUpgradeable} from
     "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-import {IZeroLanceEscrowVault} from "./interfaces/IZeroLanceEscrowVault.sol";
 import {IZeroLanceTaskRegistry} from "./interfaces/IZeroLanceTaskRegistry.sol";
 
 /// @title ZeroLanceArbitration
@@ -44,7 +43,8 @@ contract ZeroLanceArbitration is
 
     /// @custom:storage-location erc7201:zerolance.storage.ZeroLanceArbitration
     struct ArbitrationStorage {
-        IZeroLanceEscrowVault escrow;
+        address escrow; // task escrow (privileged resolver); typed as raw address
+                       // to avoid coupling Arbitration to the escrow's interface
         IZeroLanceTaskRegistry taskRegistry;
         address reputationNFT; // staked holders are eligible arbiters
         address zeroToken; // $ZERO for arbiter rewards
@@ -105,7 +105,7 @@ contract ZeroLanceArbitration is
         __ReentrancyGuard_init();
         __UUPSUpgradeable_init();
         ArbitrationStorage storage $ = _getStorage();
-        $.escrow = IZeroLanceEscrowVault(escrow_);
+        $.escrow = escrow_;
         $.taskRegistry = IZeroLanceTaskRegistry(taskRegistry_);
         $.reputationNFT = reputationNFT_;
         $.zeroToken = zeroToken_;
@@ -118,7 +118,7 @@ contract ZeroLanceArbitration is
     ///         address), so initialize receives a placeholder.
     function setEscrow(address escrow_) external onlyOwner {
         if (escrow_ == address(0)) revert ZeroAddress();
-        _getStorage().escrow = IZeroLanceEscrowVault(escrow_);
+        _getStorage().escrow = escrow_;
     }
 
     /// @notice Open a dispute for a task. Only callable by the escrow vault (which
@@ -194,7 +194,12 @@ contract ZeroLanceArbitration is
         d.winner = winner;
 
         // Distribute escrow to the winner via the vault's privileged resolve path.
-        $.escrow.resolveDispute(taskId, winner);
+        // Low-level call keeps Arbitration decoupled from the escrow's interface;
+        // the selector matches ZeroLanceTaskEscrow.resolveDispute(uint256,address).
+        (bool ok, ) = $.escrow.call(
+            abi.encodeWithSignature("resolveDispute(uint256,address)", taskId, winner)
+        );
+        require(ok, "escrow resolve failed");
 
         // Reward arbiters who voted (non-abstaining). $ZERO minted by the owner
         // role in Phase 2; here we transfer from this contract's balance.
