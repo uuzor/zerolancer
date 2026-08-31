@@ -102,32 +102,6 @@ export function registerWaveRoutes(app: Router, config: ServerConfig): void {
     return { share: share.toString(), claimed };
   }, config);
 
-  createRoute(app, {
-    path: "/v1/wave/issue/:id",
-    method: "get",
-    requireId: true,
-    consumer: "wave.issue",
-    description: "Read a Wave Issue",
-  }, async (_p, _req, res) => {
-    const wave = clientOf(config, res);
-    if (!wave) return null;
-    const issue = await wave.issueOf(BigInt(parseInt(_req.params.id!, 10)));
-    return { issue: bigintStringify(issue) };
-  }, config);
-
-  createRoute(app, {
-    path: "/v1/wave/buildathon/submission/:id",
-    method: "get",
-    requireId: true,
-    consumer: "wave.buildathon.submission",
-    description: "Read a Wave Buildathon submission",
-  }, async (_p, _req, res) => {
-    const wave = clientOf(config, res);
-    if (!wave) return null;
-    const sub = await wave.submissionOf(BigInt(parseInt(_req.params.id!, 10)));
-    return { submission: bigintStringify(sub) };
-  }, config);
-
   // ── Writes ---------------------------------------------------------------
   createRoute(app, {
     path: "/v1/wave/program/:id/deposit",
@@ -267,16 +241,6 @@ export function registerWaveRoutes(app: Router, config: ServerConfig): void {
       updatedAt: new Date().toISOString(),
     });
     return { txHash: result.txHash, programId: result.programId.toString() };
-  }, config);
-
-  createRoute(app, {
-    path: "/v1/wave/program/:id/awarder",
-    method: "post",
-    consumer: "wave.grantAwarder",
-    description: "Grant or revoke awarder role (deprecated)",
-  }, async (_p, _req, res) => {
-    sendError(res, HTTP.BAD_REQUEST, "Awarder role management moved off-chain", "DEPRECATED");
-    return null;
   }, config);
 
   createRoute(app, {
