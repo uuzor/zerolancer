@@ -63,80 +63,58 @@ guards, SafeERC20. 0G Chain (Cancun EVM, zero gas).
 - Stores: client, freelancer (assigned), deadline, reward amount, payment token,
   verification config (test thresholds, coverage gates), status enum
   (`Open → Assigned → InReview → Passed → Disputed → Resolved → Cancelled`).
-- Emits `TaskCreated`, `TaskAssigned`, `DeliverableSubmitted`, `VerdictSubmitted`,
-  `TaskResolved`.
+- Emits `TaskCreated`, `TaskAssigned`, `VerdictSubmitted`, `TaskResolved`.
 - GitHub linkage: stores `repoUrl`, `issueNumber`, `prNumber` (immutable
   alongside specHash).
 
-### 3.2 `ZeroLanceTaskEscrow` + `ZeroLanceTaskVerifier`
-Adapted from `AxiomStrategyVault` (ERC-20 instead of native) +
-`AxiomPaymentProcessor` fee split. The monolithic `ZeroLanceEscrowVault` was
-split into two contracts so each does exactly one thing:
-
-**`ZeroLanceTaskEscrow` — funds-only vault.** Holds USDC for any task, tracks
-per-task accounting, and exposes only the money-moving surface. It owns no
-business logic.
+### 3.2 `ZeroLanceTaskEscrow`
+Simplified contract combining escrow + AI verification + dispute resolution.
+All state machines (task lifecycle, disputes) live in the backend DB.
 
 - `deposit(taskId, amount)` — task client only; pulls USDC via `safeTransferFrom`.
-- `release(taskId, freelancer, feeBps, treasury)` — **TaskVerifier-only**;
+- `submitVerdict(Verdict calldata verdict)` — verifies EIP-712 via
+  `ZeroLanceTeeVerifier`; if `passed` auto-releases escrow; if `failed`
+  marks `verdictFailed` and sets status to `Disputed`.
+- `release(taskId, freelancer, feeBps, treasury)` — **signer-only** (backend);
   pays `freelancer = amount * (1 - feeBps/10000)` and `treasury = amount * feeBps/10000`.
 - `refund(taskId)` — client only, only when status is `Open`.
-- `resolveDispute(taskId, winner)` — **TaskVerifier-only** (or arbitration via
-  low-level call); full escrow pays winner with 0 fee.
+- `resolveDispute(taskId, winner)` — **signer-only**; full escrow pays winner.
+- `mintReputation(taskId, description, dataHash)` — **signer-only**; mints the
+  ERC-7857 NFT.
 - Views: `escrowedOf`, `releasedOf`, `protocolFeeBps`, `protocolTreasury`,
-  `verifier`.
+  `signer`.
 
-**`ZeroLanceTaskVerifier` — task lifecycle orchestrator.** No token custody.
+The backend signer is the trusted caller for `release`, `resolveDispute`, and
+`mintReputation`. The contract is a dumb payout router — the backend DB is the
+source of truth for all state transitions.
 
-- `submitDeliverable(taskId, deliverableHash, prNumber)` — only freelancer.
-- `submitVerdict(Verdict calldata verdict)` — verifies the EIP-712 signature
-  via `ZeroLanceTeeVerifier`; if `passed` calls `escrow.release`; if `failed`
-  records dispute state and (after 14-day retry window) opens arbitration.
-- `escalateDispute(taskId, arbiters)` — anyone after retry window; opens
-  arbiter panel.
-- `mintReputationForTask(taskId, description, dataHash)` — owner-gated;
-  mints the ERC-7857 NFT.
+### 3.3 `WaveFundingVault`
+Single contract replacing the old 5-contract wave suite (WaveFundingEscrow +
+WaveFundingVerifier + PointsLedger + ZeroLanceOssWave + ZeroLanceBuildathonWave).
+Handles escrow + points + distribution for all wave programs.
 
-The split keeps the escrow's attack surface to "move money" while keeping the
-verifier's surface to "decide what to do". Any privileged escrow action must
-go through the verifier — the escrow trusts nothing else.
+- `createProgram(token, genesisPool, numWaves, feeBps, treasury, specHash)` →
+  programId (organiser).
+- `deposit(programId, amount)` — anyone.
+- `openWave(programId)` → waveId (organiser).
+- `closeWave(programId, waveId)` (organiser).
+- `finalizeWave(programId, waveId)` — locks budget (organiser).
+- `setPoints(waveId, builder, points)` — **signer-only** (backend).
+- `claim(waveId, builder)` — anyone; computes
+  `share = (budget * builderPoints) / totalWavePoints`.
+- `emergencyWithdraw(programId, to, amount)` — owner.
+- Views: `program`, `wave`, `waveCount`, `builderPoints`, `totalWavePoints`,
+  `claimableShare`, `pooled`, `distributed`.
 
-### 3.2a Wave funding split (escrow + verifier + two mode contracts)
-The monolithic `ZeroLanceWaveProgram` + `ZeroLanceWaveIssue` +
-`ZeroLanceWaveBuildathon` triplet was rewritten into five contracts, each
-doing one thing. Wave funding has two operating modes that share the same
-funding + points infrastructure:
+**Distribution formula:**
+```
+share = (netBudget * builderPoints[waveId][builder]) / totalWavePoints[waveId]
+```
+Budget locked at `finalizeWave`. `netBudget = genesisPool * (10000 - feeBps) / 10000`.
 
-- **OSS mode** — maintainer posts paid GitHub issues inside an accepted
-  repo; builders claim, submit PRs, and earn base + compliment points.
-- **Buildathon mode** — teams register and submit per-wave projects;
-  scoring is split between whitelisted judges (base points) and community
-  voters (community points).
-
-Both modes plug into the same escrow + verifier + ledger, so they share
-funding, points accounting, and wave lifecycle.
-
-| Contract | Responsibility |
-|---|---|
-| `WaveFundingEscrow` | Funds-only vault. Holds USDC, tracks `pooled` / `distributed` / `waveBudget` per program. **The verifier is the only privileged caller.** |
-| `WaveFundingVerifier` | State + rules. Owns programs, waves, projects, awarders, points. Calls the escrow for budget locks and claim payouts. **No token custody.** |
-| `ZeroLanceOssWave` | OSS mode operations (accept repo, create/claim/submit/merge issues). Routes awards through `WaveFundingVerifier`. |
-| `ZeroLanceBuildathonWave` | Buildathon mode operations (register team, submit, judge + community scoring). Routes awards through `WaveFundingVerifier`. |
-| `PointsLedger` | Non-upgradeable, shared points accounting per wave. Frozen at wave close. Owned by the verifier. |
-
-Trust direction is strict: **mode contracts → verifier → escrow**. Mode
-contracts can only award points via the verifier; the verifier is the only
-caller allowed to move money in the escrow; the escrow never talks back
-except via events.
-
-### 3.3 `ZeroLanceArbitration`
-- New. Triggered when AI verdict = failed and retry window (2 weeks) elapses,
-  or client disputes.
-- Multi-sig of arbiters (other staked freelancers) vote on-chain:
-  `vote(taskId, winner)`.
-- Quorum + majority → winner takes escrow; arbiters earn `$ZERO` rewards.
-- Arbiter selection: staked `ZeroLanceReputationNFT` holders, randomized per
-  dispute, slashable for collusion (griefing/dishonesty).
+All state machines (programs, waves, projects, issues, builders, disputes)
+live in the backend DB. The contract is a dumb payout router: backend signer
+sets points, anyone can claim their share.
 
 ### 3.4 `ZeroLanceReputationNFT`
 Adapted from `AxiomAgentNFT` (ERC-7857 iNFT).
@@ -153,7 +131,6 @@ Adapted from `AxiomAgentNFT` (ERC-7857 iNFT).
 - ERC-20 governance token (OZ ERC20Upgradeable, UUPS).
 - **Governance**: holders vote on protocol upgrades, fee adjustments (via
   `ZeroLanceGovernor`, Phase 2).
-- **Arbiter rewards**: minted/transferred to arbiters on dispute resolution.
 - **Staking**: freelancers stake for verified badge.
 - **Task boosting**: clients burn `$ZERO` to boost urgent/high-value tasks
   (queue priority).

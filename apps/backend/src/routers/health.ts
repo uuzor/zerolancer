@@ -13,12 +13,7 @@ export function registerHealthRoutes(app: Router, config: ServerConfig): void {
       signer: config.signerAddress ?? null,
       oracle: config.oracleClient ? "configured" : "not-configured",
       escrow: config.escrowClient ? "configured" : "not-configured",
-      wave: {
-        escrow: config.waveEscrowClient ? "configured" : "not-configured",
-        verifier: config.waveVerifierClient ? "configured" : "not-configured",
-        oss: config.ossWaveClient ? "configured" : "not-configured",
-        buildathon: config.buildathonWaveClient ? "configured" : "not-configured",
-      },
+      wave: config.waveVaultClient ? "configured" : "not-configured",
       storage: config.storageService.backend,
       da: config.daPublisher ? "configured" : "not-configured",
       events: getEventStore().size,

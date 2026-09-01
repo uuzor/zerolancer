@@ -30,7 +30,12 @@ export const sharedEnvSchema = z.object({
   ZERO_CHAT_STREAM_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   ZERO_DATA_DIR: z.string().optional(),
   // GitHub runner config
-  ZERO_GITHUB_TOKEN: z.string().optional(),
-  ZERO_SANDBOX_IMAGE: z.string().optional(),
-  ZERO_VERIFICATION_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
+  ZERO_TASK_ESCROW_ADDRESS: z.string().optional(),
+  ZERO_TASK_VERIFIER_ADDRESS: z.string().optional(),
+  ZERO_WAVE_VAULT_ADDRESS: z.string().optional(),
+  // Deprecated aliases (kept for backward compatibility)
+  ZERO_WAVE_ESCROW_ADDRESS: z.string().optional(),
+  ZERO_WAVE_VERIFIER_ADDRESS: z.string().optional(),
+  ZERO_OSS_WAVE_ADDRESS: z.string().optional(),
+  ZERO_BUILDATHON_WAVE_ADDRESS: z.string().optional(),
 });

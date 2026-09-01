@@ -9,23 +9,17 @@ ZeroLance smart contracts — Foundry / Solidity 0.8.20 / OpenZeppelin 5.0.2 / 0
 | Contract | Purpose |
 |---|---|
 | `MockUSDC` | Devnet ERC-20 payment token for escrow. |
-| `ZeroLanceToken` ($ZERO) | Governance/utility token: arbiter rewards, staking, task boosting/burn. |
+| `ZeroLanceToken` ($ZERO) | Governance/utility token: staking, task boosting/burn. |
 | `ZeroLanceTeeVerifier` | EIP-712 verifier for oracle-signed AI verdicts (trust anchor for auto-release) and ERC-7857 reputation metadata proofs. |
 | `ZeroLanceTaskRegistry` | Immutable task specs (specHash on-chain, encrypted spec on 0G Storage). |
-| `ZeroLanceTaskEscrow` | Funds-only ERC-20 vault. Holds USDC per task, releases on a verified verdict via the TaskVerifier, refunds on cancellation. No deliverable/verdict logic. |
-| `ZeroLanceTaskVerifier` | Task lifecycle orchestrator. Owns `submitDeliverable`, `submitVerdict` (relays EIP-712 signed verdicts), dispute escalation, and reputation minting. The escrow trusts this contract alone for releases. |
-| `ZeroLanceArbitration` | Multi-sig dispute resolution by staked-freelancer arbiters; $ZERO rewards. |
+| `ZeroLanceTaskEscrow` | Task escrow + AI verification. Holds USDC per task, verifies EIP-712 verdicts, releases escrow, resolves disputes, mints reputation. Backend signer is the privileged caller for release/resolve/mint. |
 | `ZeroLanceReputationNFT` | ERC-7857-style reputation receipt NFT; portable encrypted portfolio; $ZERO verified badge. |
 
-### Wave funding (split into escrow + verifier + two mode contracts)
+### Wave funding (single contract)
 
 | Contract | Purpose |
 |---|---|
-| `WaveFundingEscrow` | Funds-only vault for any wave program. Holds a single ERC-20 (USDC) and tracks per-program `pooled`, `distributed`, and `waveBudget` accounting. The verifier is the sole privileged caller. |
-| `WaveFundingVerifier` | State + rules for wave programs: owns programs, waves, projects, awarders, points. Calls the escrow for budget locks and claim payouts. No token custody. |
-| `ZeroLanceOssWave` | OSS mode operations: accepted repos, maintainer-posted issues, builder claim/submit, merge-confirm awards (routes to verifier). |
-| `ZeroLanceBuildathonWave` | Buildathon mode: team registration, per-wave submissions, judge + community scoring (routes to verifier). |
-| `PointsLedger` | Non-upgradeable, shared points accounting per wave. Frozen at wave close. Owned by the verifier. |
+| `WaveFundingVault` | Wave escrow + points + distribution. Single contract for all wave programs (OSS + buildathon modes). Holds ERC-20 funds, tracks points, distributes pro-rata. Backend signer sets points; anyone can claim. |
 
 ## Build
 
@@ -47,7 +41,7 @@ DEPLOYER_PK=0x... ZERO_NETWORK=aristotle pnpm deploy:mainnet
 Two deployment manifests are written:
 
 - `docs/deployments/<network>.json` — core (task marketplace) contracts.
-- `docs/deployments/<network>-wave.json` — wave funding suite.
+- `docs/deployments/<network>-wave.json` — wave funding vault.
 
 ## Architecture
 
@@ -56,6 +50,6 @@ See `docs/ARCHITECTURE.md` for the feature→contract mapping and the full proto
 ## Notes
 
 - All upgradeable contracts use UUPS proxies with ERC-7201 namespaced storage and 1-day timelocks on sensitive rotations (verifier signer, protocol treasury).
-- `WaveFundingEscrow` and `ZeroLanceTaskEscrow` are **funds-only**: they never call out to business logic. The verifier/orchestrator contracts drive every privileged move.
-- `ZeroLanceTaskVerifier.submitVerdict` is callable by the configured TEE verifier signer (relayed via `ZeroLanceTeeVerifier.verifyVerdict`); the on-chain verifier is the trust anchor.
-- `ZeroLanceReputationNFT` stores the encrypted-metadata `dataHash` on-chain (ERC-7857 IDataStorage pattern); the oracle re-keys the encrypted blob on transfer and calls `updateMetadata`. The full `iTransfer` proof flow (IERC7857DataVerifier) layers on `ZeroLanceTeeVerifier`.
+- `ZeroLanceTaskEscrow` absorbs verifier + dispute logic: the backend signer is the privileged caller for `release`, `resolveDispute`, and `mintReputation`.
+- `WaveFundingVault` replaces the old 5-contract wave suite (WaveFundingEscrow + WaveFundingVerifier + PointsLedger + ZeroLanceOssWave + ZeroLanceBuildathonWave) with a single contract.
+- All state machines (task lifecycle, disputes, wave programs, projects, issues, builders) live in the backend DB. Contracts are dumb payout routers.

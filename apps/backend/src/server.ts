@@ -18,12 +18,8 @@ import { HTTP, type AddressName } from "@zerolance/config";
 import {
   ZEROLANCE_TASK_REGISTRY_ABI,
   ZEROLANCE_TASK_ESCROW_ABI,
-  ZEROLANCE_ARBITRATION_ABI,
   ZEROLANCE_REPUTATION_NFT_ABI,
-  WAVE_FUNDING_ESCROW_ABI,
-  WAVE_FUNDING_VERIFIER_ABI,
-  ZEROLANCE_OSS_WAVE_ABI,
-  ZEROLANCE_BUILDATHON_WAVE_ABI,
+  WAVE_FUNDING_VAULT_ABI,
 } from "@zerolance/config";
 import {
   createApiKeyAuth,
@@ -50,7 +46,7 @@ import { registerDaRoutes } from "./routers/da.js";
 import { attachWebsocket } from "./ws/handler.js";
 import { DefaultOracleClient, type OracleClient } from "./oracle/client.js";
 import { EscrowClient } from "./escrow/client.js";
-import { WaveEscrowClient, WaveVerifierClient, OssWaveClient, BuildathonWaveClient } from "./wave/index.js";
+import { WaveFundingVaultClient } from "./wave/index.js";
 import { StorageService } from "./storage/service.js";
 import { DaPublisher } from "./da/publisher.js";
 import { VerdictOrchestrator } from "./compute/verdict-orchestrator.js";
@@ -72,10 +68,7 @@ export interface ServerConfig {
   oracleClient: OracleClient | null;
   escrowClient: EscrowClient | null;
   verdictOrchestrator: VerdictOrchestrator | null;
-  waveEscrowClient: WaveEscrowClient | null;
-  waveVerifierClient: WaveVerifierClient | null;
-  ossWaveClient: OssWaveClient | null;
-  buildathonWaveClient: BuildathonWaveClient | null;
+  waveVaultClient: WaveFundingVaultClient | null;
   storageService: StorageService;
   daPublisher: DaPublisher | null;
   indexers: Indexer[];
@@ -162,50 +155,16 @@ export async function createApp(env: BackendEnv): Promise<{
     );
   }
 
-  // Wave funding stack — each client is constructed only when its
-  // corresponding address env var is set.
-  let waveEscrowClient: WaveEscrowClient | null = null;
-  const waveEscrowAddr = env.ZERO_WAVE_ESCROW_ADDRESS as `0x${string}` | undefined;
-  if (waveEscrowAddr) {
-    waveEscrowClient = new WaveEscrowClient({
-      escrowAddress: waveEscrowAddr,
+  // Wave funding vault — constructed only when ZERO_WAVE_VAULT_ADDRESS is set.
+  let waveVaultClient: WaveFundingVaultClient | null = null;
+  const waveVaultAddr = env.ZERO_WAVE_VAULT_ADDRESS as `0x${string}` | undefined;
+  if (waveVaultAddr) {
+    waveVaultClient = new WaveFundingVaultClient({
+      vaultAddress: waveVaultAddr,
       provider,
       signer,
     });
-    log.info("WaveEscrowClient configured", { escrow: waveEscrowAddr });
-  }
-
-  let waveVerifierClient: WaveVerifierClient | null = null;
-  const waveVerifierAddr = env.ZERO_WAVE_VERIFIER_ADDRESS as `0x${string}` | undefined;
-  if (waveVerifierAddr) {
-    waveVerifierClient = new WaveVerifierClient({
-      verifierAddress: waveVerifierAddr,
-      provider,
-      signer,
-    });
-    log.info("WaveVerifierClient configured", { verifier: waveVerifierAddr });
-  }
-
-  let ossWaveClient: OssWaveClient | null = null;
-  const ossWaveAddr = env.ZERO_OSS_WAVE_ADDRESS as `0x${string}` | undefined;
-  if (ossWaveAddr) {
-    ossWaveClient = new OssWaveClient({
-      ossAddress: ossWaveAddr,
-      provider,
-      signer,
-    });
-    log.info("OssWaveClient configured", { oss: ossWaveAddr });
-  }
-
-  let buildathonWaveClient: BuildathonWaveClient | null = null;
-  const buildathonWaveAddr = env.ZERO_BUILDATHON_WAVE_ADDRESS as `0x${string}` | undefined;
-  if (buildathonWaveAddr) {
-    buildathonWaveClient = new BuildathonWaveClient({
-      buildathonAddress: buildathonWaveAddr,
-      provider,
-      signer,
-    });
-    log.info("BuildathonWaveClient configured", { buildathon: buildathonWaveAddr });
+    log.info("WaveFundingVaultClient configured", { vault: waveVaultAddr });
   }
 
   // 0G Storage service for artifact blobs (real 0G when signer + storage RPC set).
@@ -246,34 +205,14 @@ export async function createApp(env: BackendEnv): Promise<{
         source: "escrow",
       },
       {
-        address: addresses.arbitration,
-        abi: [...ZEROLANCE_ARBITRATION_ABI],
-        source: "arbitration",
-      },
-      {
         address: addresses.reputationNft,
         abi: [...ZEROLANCE_REPUTATION_NFT_ABI],
         source: "reputation",
       },
       {
-        address: (env.ZERO_WAVE_ESCROW_ADDRESS as `0x${string}` | undefined),
-        abi: [...WAVE_FUNDING_ESCROW_ABI],
-        source: "wave-escrow",
-      },
-      {
-        address: (env.ZERO_WAVE_VERIFIER_ADDRESS as `0x${string}` | undefined),
-        abi: [...WAVE_FUNDING_VERIFIER_ABI],
-        source: "wave-verifier",
-      },
-      {
-        address: (env.ZERO_OSS_WAVE_ADDRESS as `0x${string}` | undefined),
-        abi: [...ZEROLANCE_OSS_WAVE_ABI],
-        source: "wave-oss",
-      },
-      {
-        address: (env.ZERO_BUILDATHON_WAVE_ADDRESS as `0x${string}` | undefined),
-        abi: [...ZEROLANCE_BUILDATHON_WAVE_ABI],
-        source: "wave-buildathon",
+        address: (env.ZERO_WAVE_VAULT_ADDRESS as `0x${string}` | undefined),
+        abi: [...WAVE_FUNDING_VAULT_ABI],
+        source: "wave-vault",
       },
     ];
     for (const def of defs) {
@@ -303,10 +242,7 @@ export async function createApp(env: BackendEnv): Promise<{
     oracleClient,
     escrowClient,
     verdictOrchestrator,
-    waveEscrowClient,
-    waveVerifierClient,
-    ossWaveClient,
-    buildathonWaveClient,
+    waveVaultClient,
     storageService,
     daPublisher,
     indexers,

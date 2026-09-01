@@ -3,72 +3,26 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 import {MockUSDC} from "src/MockUSDC.sol";
 import {ZeroLanceTaskRegistry} from "src/ZeroLanceTaskRegistry.sol";
 import {IZeroLanceTaskRegistry} from "src/interfaces/IZeroLanceTaskRegistry.sol";
 import {ZeroLanceTaskEscrow} from "src/ZeroLanceTaskEscrow.sol";
 import {IZeroLanceTaskEscrow} from "src/interfaces/IZeroLanceTaskEscrow.sol";
-import {ZeroLanceTaskVerifier} from "src/ZeroLanceTaskVerifier.sol";
-import {IZeroLanceTaskVerifier} from "src/interfaces/IZeroLanceTaskVerifier.sol";
 import {ZeroLanceTeeVerifier} from "src/verifiers/ZeroLanceTeeVerifier.sol";
 import {IZeroLanceTeeVerifier} from "src/interfaces/IZeroLanceTeeVerifier.sol";
-import {ZeroLanceArbitration} from "src/ZeroLanceArbitration.sol";
 import {ZeroLanceReputationNFT} from "src/ZeroLanceReputationNFT.sol";
 
-/// @dev Test-only dispatcher that bridges the gap between the legacy
-///      ZeroLanceArbitration's "escrow" gate and the rewritten escrow stack.
-///      Arbitration's `openDispute` gates on `msg.sender == address($.escrow)`,
-///      and `_resolve` calls `$.escrow.resolveDispute(...)`. In the rewritten
-///      stack the caller of openDispute is ZeroLanceTaskVerifier and the
-///      target of resolveDispute is ZeroLanceTaskEscrow. This dispatcher sits
-///      at arbitration's `$.escrow` slot: it forwards openDispute from the
-///      taskVerifier and forwards resolveDispute from arbitration to the
-///      real escrow.
-contract ArbitrationDispatcher {
-    address public immutable escrow;
-    address public immutable taskVerifier;
-    address public immutable arbitration;
-
-    constructor(address escrow_, address taskVerifier_, address arbitration_) {
-        escrow = escrow_;
-        taskVerifier = taskVerifier_;
-        arbitration = arbitration_;
-    }
-
-    /// @notice Called by the taskVerifier (the only authorized initiator).
-    function openDispute(uint256 taskId, address[] calldata arbiters) external {
-        require(msg.sender == taskVerifier, "dispatcher: not taskVerifier");
-        (bool ok, bytes memory ret) = arbitration.call(
-            abi.encodeWithSelector(ZeroLanceArbitration.openDispute.selector, taskId, arbiters)
-        );
-        require(ok, string(ret));
-    }
-
-    /// @notice Called by arbitration after quorum is reached; forward to real escrow.
-    function resolveDispute(uint256 taskId, address winner) external {
-        require(msg.sender == arbitration, "dispatcher: not arbitration");
-        (bool ok, bytes memory ret) = escrow.call(
-            abi.encodeWithSelector(IZeroLanceTaskEscrow.resolveDispute.selector, taskId, winner)
-        );
-        require(ok, string(ret));
-    }
-}
-
 /// @title EscrowFlowTest
-/// @notice Validates the rewritten task escrow stack:
-///         ZeroLanceTaskRegistry + ZeroLanceTaskEscrow (funds-only) +
-///         ZeroLanceTaskVerifier (deliverable + verdict + dispute + reputation).
+/// @notice Tests for the simplified ZeroLanceTaskEscrow contract.
+/// @dev Exercises deposit/release via verdict, refund, dispute flow,
+///      and access control gates.
 contract EscrowFlowTest is Test {
     MockUSDC usdc;
     ZeroLanceTaskRegistry registry;
     ZeroLanceTeeVerifier teeVerifier;
-    ZeroLanceTaskEscrow escrow;
-    ZeroLanceArbitration arbitration;
     ZeroLanceReputationNFT reputation;
-    ZeroLanceTaskVerifier taskVerifier;
-    ArbitrationDispatcher arbDispatcher;
+    ZeroLanceTaskEscrow escrow;
 
     address admin = makeAddr("admin");
     address client = makeAddr("client");
@@ -79,9 +33,7 @@ contract EscrowFlowTest is Test {
     uint256 constant SIGNER_PK = 0xA11CE;
     address teeSigner;
 
-    address arbiter1 = makeAddr("arbiter1");
-    address arbiter2 = makeAddr("arbiter2");
-    address arbiter3 = makeAddr("arbiter3");
+    uint16 constant FEE_BPS = 250; // 2.5%
 
     function setUp() public {
         teeSigner = vm.addr(SIGNER_PK);
@@ -106,30 +58,12 @@ contract EscrowFlowTest is Test {
             new ERC1967Proxy(
                 address(regImpl),
                 abi.encodeWithSelector(
-                    ZeroLanceTaskRegistry.initialize.selector, admin, address(0)
+                    ZeroLanceTaskRegistry.initialize.selector, admin, address(escrow)
                 )
             )
         ));
 
-        // 3) Arbitration (placeholder treasury + escrow, set later).
-        ZeroLanceArbitration arbImpl = new ZeroLanceArbitration();
-        arbitration = ZeroLanceArbitration(address(
-            new ERC1967Proxy(
-                address(arbImpl),
-                abi.encodeWithSelector(
-                    ZeroLanceArbitration.initialize.selector,
-                    address(1), // placeholder escrow, set later
-                    address(registry),
-                    address(0), // reputation NFT (set later)
-                    address(0), // zero token
-                    0,
-                    51, // 51% quorum
-                    admin
-                )
-            )
-        ));
-
-        // 4) Reputation NFT (escrow gets MINTER_ROLE initially; will swap to taskVerifier).
+        // 3) Reputation NFT.
         ZeroLanceReputationNFT repImpl = new ZeroLanceReputationNFT();
         reputation = ZeroLanceReputationNFT(address(
             new ERC1967Proxy(
@@ -137,14 +71,14 @@ contract EscrowFlowTest is Test {
                 abi.encodeWithSelector(
                     ZeroLanceReputationNFT.initialize.selector,
                     address(0), // zero token
-                    address(1), // placeholder escrow (will overwrite)
+                    address(0), // placeholder escrow (will overwrite)
                     address(teeVerifier),
                     admin
                 )
             )
         ));
 
-        // 5) Task escrow.
+        // 4) Task escrow.
         ZeroLanceTaskEscrow escImpl = new ZeroLanceTaskEscrow();
         escrow = ZeroLanceTaskEscrow(address(
             new ERC1967Proxy(
@@ -153,89 +87,49 @@ contract EscrowFlowTest is Test {
                     ZeroLanceTaskEscrow.initialize.selector,
                     admin,
                     address(registry),
-                    address(1), // placeholder verifier
-                    address(arbitration)
-                )
-            )
-        ));
-        vm.prank(admin);
-        escrow.setTreasury(treasury);
-        vm.prank(admin);
-        escrow.setProtocolFeeBps(300); // 3%
-
-        // 6) Task verifier (verdict orchestrator).
-        ZeroLanceTaskVerifier verImpl = new ZeroLanceTaskVerifier();
-        taskVerifier = ZeroLanceTaskVerifier(address(
-            new ERC1967Proxy(
-                address(verImpl),
-                abi.encodeWithSelector(
-                    ZeroLanceTaskVerifier.initialize.selector,
-                    admin,
-                    address(registry),
+                    treasury,
+                    FEE_BPS,
                     address(teeVerifier),
-                    address(escrow),
                     address(reputation),
-                    address(arbitration)
+                    teeSigner
                 )
             )
         ));
 
-        // 7) Wire cross-references.
-        //    - Registry: authorizedSetters = taskVerifier (it transitions task status).
-        //    - Escrow: verifier = taskVerifier (the only privileged caller for release).
-        //    - Reputation: minter = taskVerifier (replace placeholder escrow).
+        // 5) Wire cross-references.
         vm.prank(admin);
-        registry.setAuthorizedSetter(address(taskVerifier));
+        registry.setAuthorizedSetter(address(escrow));
         vm.prank(admin);
-        escrow.setVerifier(address(taskVerifier));
-        vm.prank(admin);
-        reputation.setEscrow(address(taskVerifier));
+        reputation.setEscrow(address(escrow));
         bytes32 minterRole = reputation.MINTER_ROLE();
         vm.prank(admin);
-        reputation.grantRole(minterRole, address(taskVerifier));
-
-        // 8) Deploy dispatcher + point arbitration at it. The dispatcher allows
-        //    the taskVerifier to drive arbitration.openDispute (the legacy gate)
-        //    and forwards arbitration._resolve's resolveDispute() to the real
-        //    escrow. This workaround reflects a design gap in the rewritten
-        //    stack where taskVerifier.escalateDispute can't satisfy
-        //    arbitration's `msg.sender == address($.escrow)` gate directly.
-        arbDispatcher = new ArbitrationDispatcher(address(escrow), address(taskVerifier), address(arbitration));
-        vm.prank(admin);
-        arbitration.setEscrow(address(arbDispatcher));
-        // The dispatcher is what escrow sees as its "arbitration" (so its
-        // resolveDispute gate accepts calls forwarded from real arbitration).
-        vm.prank(admin);
-        escrow.setArbitration(address(arbDispatcher));
-
-        // Grant the deployer (test contract) the operator role on taskVerifier for mintReputation.
-        vm.prank(admin);
-        taskVerifier.setOperator(address(this), true);
+        reputation.grantRole(minterRole, address(escrow));
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────────
 
-    function _createAndDeposit() internal returns (uint256 taskId) {
-        vm.startPrank(client);
-        usdc.approve(address(escrow), type(uint256).max);
+    function _createTask() internal returns (uint256 taskId) {
+        vm.prank(client);
         taskId = registry.createTask(
             keccak256("spec"),
             IZeroLanceTaskRegistry.TaskCategory.Code,
             address(usdc),
-            1000e6,
+            100_000e6,
             block.timestamp + 30 days,
             "https://github.com/org/repo",
             42,
             8000
         );
-        registry.assignTask(taskId, freelancer);
-        escrow.deposit(taskId, 1000e6);
-        vm.stopPrank();
     }
 
-    function _submitDeliverable(uint256 taskId, bytes32 deliverableHash) internal {
-        vm.prank(freelancer);
-        taskVerifier.submitDeliverable(taskId, deliverableHash, 0);
+    function _createAndDeposit() internal returns (uint256 taskId) {
+        taskId = _createTask();
+        vm.prank(client);
+        usdc.approve(address(escrow), type(uint256).max);
+        vm.prank(client);
+        registry.assignTask(taskId, freelancer);
+        vm.prank(client);
+        escrow.deposit(taskId, 100_000e6);
     }
 
     function _signVerdict(
@@ -288,8 +182,12 @@ contract EscrowFlowTest is Test {
     function test_DepositReleaseFlow() public {
         uint256 taskId = _createAndDeposit();
         bytes32 deliverableHash = keccak256("deliverable");
-        _submitDeliverable(taskId, deliverableHash);
 
+        // Freelancer submits deliverable.
+        vm.prank(freelancer);
+        registry.submitDeliverable(taskId, deliverableHash, 1);
+
+        // Sign a passing verdict.
         bytes32 nonce = keccak256("nonce1");
         uint256 validUntil = block.timestamp + 1 days;
         IZeroLanceTeeVerifier.Verdict memory v =
@@ -298,137 +196,90 @@ contract EscrowFlowTest is Test {
         uint256 freelancerBefore = usdc.balanceOf(freelancer);
         uint256 treasuryBefore = usdc.balanceOf(treasury);
 
-        taskVerifier.submitVerdict(v);
+        // Submit verdict to escrow.
+        escrow.submitVerdict(v);
 
-        // 3% fee on 1000e6 = 30e6 to treasury; 970e6 to freelancer.
-        assertEq(usdc.balanceOf(freelancer) - freelancerBefore, 970e6, "freelancer payout");
-        assertEq(usdc.balanceOf(treasury) - treasuryBefore, 30e6, "treasury fee");
+        // 2.5% fee on 100_000e6 = 2_500e6 to treasury; 97_500e6 to freelancer.
+        assertEq(usdc.balanceOf(freelancer) - freelancerBefore, 97_500e6, "freelancer payout");
+        assertEq(usdc.balanceOf(treasury) - treasuryBefore, 2_500e6, "treasury fee");
         assertEq(
             uint8(registry.taskOf(taskId).status),
             uint8(IZeroLanceTaskRegistry.TaskStatus.Passed),
             "status Passed"
         );
-
-        // Mint reputation NFT for the completed task.
-        bytes32 dataHash = keccak256("reputation-data");
-        uint256 tokenId = taskVerifier.mintReputationForTask(taskId, "AI-verified delivery", dataHash);
-        assertEq(tokenId, 0, "first tokenId");
-        assertEq(reputation.ownerOf(tokenId), freelancer, "NFT owner = freelancer");
-        assertEq(reputation.taskIdOf(tokenId), taskId, "NFT taskId linked");
     }
 
     function test_Refund_OpenTask() public {
-        // Create + assign + deposit, then refund.
-        vm.startPrank(client);
+        uint256 taskId = _createTask();
+
+        vm.prank(client);
         usdc.approve(address(escrow), type(uint256).max);
-        uint256 taskId = registry.createTask(
-            keccak256("spec"),
-            IZeroLanceTaskRegistry.TaskCategory.Code,
-            address(usdc),
-            1000e6,
-            block.timestamp + 30 days,
-            "https://github.com/org/repo",
-            42,
-            8000
-        );
-        escrow.deposit(taskId, 1000e6);
-        // Task is still Open (not Assigned), so refund is allowed.
-        vm.stopPrank();
+        vm.prank(client);
+        escrow.deposit(taskId, 100_000e6);
 
         uint256 balBefore = usdc.balanceOf(client);
         vm.prank(client);
         escrow.refund(taskId);
-        assertEq(usdc.balanceOf(client) - balBefore, 1000e6, "client refunded");
+        assertEq(usdc.balanceOf(client) - balBefore, 100_000e6, "client refunded");
         assertTrue(escrow.releasedOf(taskId), "marked released");
     }
 
-    function test_DisputeEscalation() public {
+    function test_FailedVerdict_SetsDisputed() public {
         uint256 taskId = _createAndDeposit();
         bytes32 deliverableHash = keccak256("deliverable");
-        _submitDeliverable(taskId, deliverableHash);
 
-        // Sign a FAILING verdict.
+        vm.prank(freelancer);
+        registry.submitDeliverable(taskId, deliverableHash, 1);
+
+        // Sign a failing verdict.
         bytes32 nonce = keccak256("nonce-fail");
         uint256 validUntil = block.timestamp + 1 days;
         IZeroLanceTeeVerifier.Verdict memory v =
             _signVerdict(taskId, deliverableHash, false, 2000, nonce, validUntil);
 
-        taskVerifier.submitVerdict(v);
+        escrow.submitVerdict(v);
         assertEq(
             uint8(registry.taskOf(taskId).status),
             uint8(IZeroLanceTaskRegistry.TaskStatus.Disputed),
             "status Disputed after fail"
         );
+    }
 
-        // Warp past the 14-day retry window.
-        vm.warp(block.timestamp + 15 days);
+    function test_OnlyClientCanDeposit() public {
+        uint256 taskId = _createTask();
 
-        // Open dispute via the dispatcher (taskVerifier.escalateDispute would
-        // call arbitration.openDispute directly, but arbitration's escrow
-        // gate would reject taskVerifier. The dispatcher bridges this.)
-        address[] memory arbiters = new address[](3);
-        arbiters[0] = arbiter1;
-        arbiters[1] = arbiter2;
-        arbiters[2] = arbiter3;
-        // taskVerifier is the only authorized caller of dispatcher.openDispute.
-        // We invoke it via vm.prank so msg.sender = taskVerifier.
-        vm.prank(address(taskVerifier));
-        arbDispatcher.openDispute(taskId, arbiters);
+        vm.expectRevert(IZeroLanceTaskEscrow.NotClient.selector);
+        vm.prank(freelancer);
+        escrow.deposit(taskId, 100_000e6);
+    }
 
-        // Vote Freelancer — single vote hits quorum (51% of 3 → 1).
-        vm.prank(arbiter1);
-        arbitration.vote(taskId, ZeroLanceArbitration.VoteChoice.Freelancer);
+    function test_ResolveDispute_SignerOnly() public {
+        uint256 taskId = _createAndDeposit();
+        bytes32 deliverableHash = keccak256("deliverable");
 
-        // After quorum, arbitration._resolve calls dispatcher.resolveDispute, which
-        // forwards to escrow.resolveDispute → funds transfer to freelancer.
-        // (Status remains Disputed in the rewritten stack: taskVerifier does
-        // not transition to Resolved after arbitration voting — design gap.)
-        assertEq(usdc.balanceOf(freelancer), 1000e6, "freelancer gets full escrow (no fee on dispute)");
+        vm.prank(freelancer);
+        registry.submitDeliverable(taskId, deliverableHash, 1);
+
+        bytes32 nonce = keccak256("nonce-fail2");
+        uint256 validUntil = block.timestamp + 1 days;
+        IZeroLanceTeeVerifier.Verdict memory v =
+            _signVerdict(taskId, deliverableHash, false, 2000, nonce, validUntil);
+
+        escrow.submitVerdict(v);
+
+        uint256 freelancerBefore = usdc.balanceOf(freelancer);
+        // Signer resolves dispute in favor of freelancer.
+        vm.prank(teeSigner);
+        escrow.resolveDispute(taskId, freelancer);
+        assertEq(usdc.balanceOf(freelancer) - freelancerBefore, 100_000e6, "freelancer gets full amount");
     }
 
     function test_Verifier_OnlyPrivilegedCaller() public {
         uint256 taskId = _createAndDeposit();
-        bytes32 deliverableHash = keccak256("deliverable");
-        _submitDeliverable(taskId, deliverableHash);
 
-        // Sign a passing verdict, then attempt to submit it via the escrow directly
-        // (which should revert — only the verifier/taskVerifier may call release).
-        bytes32 nonce = keccak256("nonce-priv");
-        uint256 validUntil = block.timestamp + 1 days;
-        IZeroLanceTeeVerifier.Verdict memory v =
-            _signVerdict(taskId, deliverableHash, true, 9000, nonce, validUntil);
-        v.nonce = keccak256("other-nonce"); // not used; we test the escrow gate instead
-
-        // The escrow itself only exposes release/resolveDispute/refund, not
-        // submitVerdict. The privileged-caller gate is enforced inside escrow.release
-        // via `if (msg.sender != $.verifier) revert NotVerifier();`. Attempt to
-        // call release from an arbitrary EOA.
-        vm.expectRevert(IZeroLanceTaskEscrow.NotVerifier.selector);
-        vm.prank(builderAProxy());
-        escrow.release(taskId, freelancer, 300, treasury);
-    }
-
-    // Helper to build a random external address (not in setUp accounts).
-    function builderAProxy() internal pure returns (address) {
-        return address(uint160(uint256(keccak256("external-eoa"))));
-    }
-
-    function test_RevertIf_EscalateBeforeRetryWindowElapses() public {
-        uint256 taskId = _createAndDeposit();
-        bytes32 deliverableHash = keccak256("deliverable");
-        _submitDeliverable(taskId, deliverableHash);
-
-        bytes32 nonce = keccak256("nonce-fail3");
-        uint256 validUntil = block.timestamp + 1 days;
-        IZeroLanceTeeVerifier.Verdict memory v =
-            _signVerdict(taskId, deliverableHash, false, 1000, nonce, validUntil);
-
-        taskVerifier.submitVerdict(v);
-
-        // Try to escalate immediately — retry window still open.
-        address[] memory arbiters = new address[](1);
-        arbiters[0] = arbiter1;
-        vm.expectRevert(IZeroLanceTaskVerifier.RetryWindowOpen.selector);
-        taskVerifier.escalateDispute(taskId, arbiters);
+        // Arbitrary caller tries release → revert NotVerifier.
+        vm.expectRevert(IZeroLanceTaskEscrow.NotSigner.selector);
+        vm.prank(freelancer);
+        escrow.release(taskId, freelancer, FEE_BPS, treasury);
     }
 }
