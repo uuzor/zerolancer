@@ -28,4 +28,9 @@ export function registerHealthRoutes(app: Router, config: ServerConfig): void {
       routes: REGISTERED_ROUTES,
     });
   });
+
+  // Public route catalog (also referenced by the client-key allowlist).
+  app.get("/v1/routes", (_req: Request, res: Response) => {
+    res.json({ routes: REGISTERED_ROUTES });
+  });
 }

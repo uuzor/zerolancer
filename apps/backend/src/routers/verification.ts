@@ -61,6 +61,7 @@ export function registerVerificationRoutes(app: Router, config: ServerConfig): v
     schema: submitVerdictSchema,
     consumer: "verification.submit",
     description: "Relay a signed verdict on-chain (permissionless submitVerdict)",
+    requireServer: true,
     broadcast: "Released",
   }, async (parsed, _req, res) => {
     const client = config.escrowClient;

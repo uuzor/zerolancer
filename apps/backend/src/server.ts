@@ -27,7 +27,6 @@ import {
 import {
   createApiKeyAuth,
   enforceClientPathAllowlist,
-  requireServerAuth,
 } from "@zerolance/config/middleware/auth";
 import { loadEnv } from "@zerolance/config/env";
 import { getAddresses } from "@zerolance/config/addresses";
@@ -282,6 +281,10 @@ export async function createApp(env: BackendEnv): Promise<{
   app.use(cors({ origin: env.ZERO_FRONTEND_URL ?? "http://localhost:5173" }));
   app.use(compression());
   app.use(express.json({ limit: "2mb" }));
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    (res.locals as { requestId?: string }).requestId = randomUUID();
+    next();
+  });
   app.use(
     createApiKeyAuth(
       env.ZERO_API_KEY,
@@ -292,10 +295,6 @@ export async function createApp(env: BackendEnv): Promise<{
   );
   app.use(enforceClientPathAllowlist);
   app.use(rateLimit({ windowMs: 60_000, max: env.ZERO_RATE_LIMIT_MAX }));
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    (res.locals as { requestId?: string }).requestId = randomUUID();
-    next();
-  });
 
   const router = express.Router();
   registerHealthRoutes(router, config);
@@ -312,8 +311,6 @@ export async function createApp(env: BackendEnv): Promise<{
   registerDaRoutes(router, config);
   app.use(router);
 
-  app.use("/v1/verification/submit", requireServerAuth);
-
   Sentry.setupExpressErrorHandler(app);
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
@@ -323,10 +320,10 @@ export async function createApp(env: BackendEnv): Promise<{
         .json({ error: err.issues[0]?.message ?? "Validation error" });
       return;
     }
+    // Never echo raw error strings (engine text, RPC payloads, stack lines).
     const message = extractErrorMessage(err);
     log.error("request failed", { error: message });
-    const safe = message.length > 200 ? message.slice(0, 200) + "..." : message;
-    res.status(HTTP.INTERNAL).json({ error: safe, code: "INTERNAL_ERROR" });
+    res.status(HTTP.INTERNAL).json({ error: "internal server error", code: "INTERNAL_ERROR" });
   });
 
   const server = app.listen(env.ZERO_PORT, env.ZERO_BIND, () => {
