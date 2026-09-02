@@ -8,6 +8,7 @@ export interface OGNetwork {
   readonly addresses?: Partial<{
     readonly waveVault: `0x${string}`;
     readonly taskEscrow: `0x${string}`;
+    readonly taskRegistry: `0x${string}`;
     readonly taskVerifier: `0x${string}`;
     // Deprecated aliases
     readonly waveFundingEscrow: `0x${string}`;
