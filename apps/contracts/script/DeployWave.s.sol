@@ -4,81 +4,44 @@ pragma solidity ^0.8.20;
 import {Script, console} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import {ZeroLanceWaveProgram} from "../src/zerolancewave/ZeroLanceWaveProgram.sol";
-import {ZeroLanceWaveIssue} from "../src/zerolancewave/ZeroLanceWaveIssue.sol";
-import {ZeroLanceWaveBuildathon} from "../src/zerolancewave/ZeroLanceWaveBuildathon.sol";
+import {WaveFundingVault} from "../src/zerolancewave/WaveFundingVault.sol";
 
-/// @notice Deploys the ZeroLance wave funding suite (WaveProgram + Issue + Buildathon)
-///         behind UUPS proxies. Grants the mode contracts as awarders on the program so
-///         their points route through. Writes a manifest to
-///         ../../docs/deployments/<network>-wave.json.
+/// @notice Deploys the simplified ZeroLance wave funding contract: a single
+///         WaveFundingVault behind an ERC1967Proxy. The vault handles escrow,
+///         points, and pro-rata distribution for all wave programs (OSS +
+///         buildathon modes). All state machines live in the backend DB.
 contract DeployWave is Script {
     struct Addrs {
-        address waveProgram;
-        address waveIssue;
-        address waveBuildathon;
-        address pointsLedger;
+        address waveFundingVault;
     }
 
     function run() external returns (Addrs memory a) {
         uint256 pk = vm.envUint("DEPLOYER_PK");
         address admin = vm.addr(pk);
+        address treasury = vm.envOr("ZERO_TREASURY", admin);
+        address signer = vm.envOr("ZERO_TEE_SIGNER", admin);
 
         vm.startBroadcast(pk);
 
-        ZeroLanceWaveProgram progImpl = new ZeroLanceWaveProgram();
-        ZeroLanceWaveProgram waveProgram = ZeroLanceWaveProgram(
+        WaveFundingVault vaultImpl = new WaveFundingVault();
+        WaveFundingVault waveVault = WaveFundingVault(
             address(
                 new ERC1967Proxy(
-                    address(progImpl),
-                    abi.encodeCall(ZeroLanceWaveProgram.initialize, (admin))
+                    address(vaultImpl),
+                    abi.encodeCall(WaveFundingVault.initialize, (admin, treasury, signer))
                 )
             )
         );
-
-        ZeroLanceWaveIssue wiImpl = new ZeroLanceWaveIssue();
-        ZeroLanceWaveIssue waveIssue = ZeroLanceWaveIssue(
-            address(
-                new ERC1967Proxy(
-                    address(wiImpl),
-                    abi.encodeCall(ZeroLanceWaveIssue.initialize, (admin, address(waveProgram)))
-                )
-            )
-        );
-
-        ZeroLanceWaveBuildathon baImpl = new ZeroLanceWaveBuildathon();
-        ZeroLanceWaveBuildathon buildathon = ZeroLanceWaveBuildathon(
-            address(
-                new ERC1967Proxy(
-                    address(baImpl),
-                    abi.encodeCall(
-                        ZeroLanceWaveBuildathon.initialize,
-                        (admin, address(waveProgram))
-                    )
-                )
-            )
-        );
-
-        // NOTE: awarder grants are per-program (grantAwarder(programId, who, allowed))
-        // and are done by the organizer at runtime, not at deploy time.
 
         vm.stopBroadcast();
 
-        a = Addrs({
-            waveProgram: address(waveProgram),
-            waveIssue: address(waveIssue),
-            waveBuildathon: address(buildathon),
-            pointsLedger: address(0)
-        });
+        a = Addrs({waveFundingVault: address(waveVault)});
 
         _writeManifest(a, admin);
 
         // solhint-disable no-console
         console.log("=== ZeroLance Wave deployed ===");
-        console.log("WaveProgram:   ", a.waveProgram);
-        console.log("WaveIssue:     ", a.waveIssue);
-        console.log("WaveBuildathon:", a.waveBuildathon);
-        console.log("PointsLedger:  ", a.pointsLedger);
+        console.log("WaveFundingVault: ", a.waveFundingVault);
         // solhint-enable no-console
     }
 
@@ -87,10 +50,7 @@ contract DeployWave is Script {
         string memory json = string.concat(
             '{"network":"', network, '",',
             '"deployer":"', vm.toString(admin), '",',
-            '"waveProgram":"', vm.toString(a.waveProgram), '",',
-            '"waveIssue":"', vm.toString(a.waveIssue), '",',
-            '"waveBuildathon":"', vm.toString(a.waveBuildathon), '",',
-            '"pointsLedger":"', vm.toString(a.pointsLedger), '"}'
+            '"waveFundingVault":"', vm.toString(a.waveFundingVault), '"}'
         );
         vm.writeFile(string.concat("../../docs/deployments/", network, "-wave.json"), json);
     }

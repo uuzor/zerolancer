@@ -39,12 +39,12 @@ Package scope: `@zerolance/{config,shared,contracts,backend,oracle,frontend}`.
 
 | ZeroLance feature | axiom pattern reused | ZeroLance artifact |
 |---|---|---|
-| 1. AI-Verified Escrow | `AxiomStrategyVault` (per-token vault, Merkle-verified execute) + `AxiomPaymentProcessor` (ERC-20 fee split) | `ZeroLanceEscrowVault` (ERC-20 USDC, auto-release on AI verdict, 2–3% fee) |
+| 1. AI-Verified Escrow | `AxiomStrategyVault` (per-token vault, Merkle-verified execute) + `AxiomPaymentProcessor` (ERC-20 fee split) | `ZeroLanceTaskEscrow` (funds-only USDC vault) + `ZeroLanceTaskVerifier` (deliverable + verdict + dispute + reputation) |
 | 2. GitHub-Native Workflows | Oracle EIP-712 signing + backend orchestrator (0G Compute inference) | `GitHubRunner` service + `ZeroLanceTeeVerifier` verdict signatures |
 | 3. Multi-Sig Dispute Arbitration | Timelock + on-chain voting patterns | `ZeroLanceArbitration` (arbiter multi-sig voting, $ZERO rewards, 2-week retry window) |
 | 4. Immutable Task Specs | 0G Storage adapter + on-chain `dataHash` | `ZeroLanceTaskRegistry` (spec hash committed on-chain, immutable after creation) |
 | 5. Portable Reputation (ERC-7857) | `AxiomAgentNFT` (ERC-7857 iNFT, TEE re-keying) | `ZeroLanceReputationNFT` (NFT receipt per task, portfolio metadata, verified badge via staking) |
-| 6. Streaming Escrow | `AxiomStrategyVault` milestone/execute model | `ZeroLanceEscrowVault` streaming extension (per-milestone auto-release) |
+| 6. Streaming Escrow | `AxiomStrategyVault` milestone/execute model | Out of MVP (single-release only); `ZeroLanceTaskEscrow` designed to be extended with a streaming/milestone module behind the verifier. |
 | 7. Marketplace Dashboard | `@axiom/frontend` (Vite+React+wagmi) | `@zerolance/frontend` (tasks, creation, verification status, dispute UI) |
 | 8. Token Economics ($ZERO) | — (new) | `ZeroLanceToken` (governance, arbiter rewards, staking, task boosting/burn) |
 | Verifier trust anchor | `AxiomTeeVerifier` (EIP-712 proof verification) | `ZeroLanceTeeVerifier` (verifies AI verdicts + ERC-7857 transfers) |
@@ -63,34 +63,58 @@ guards, SafeERC20. 0G Chain (Cancun EVM, zero gas).
 - Stores: client, freelancer (assigned), deadline, reward amount, payment token,
   verification config (test thresholds, coverage gates), status enum
   (`Open → Assigned → InReview → Passed → Disputed → Resolved → Cancelled`).
-- Emits `TaskCreated`, `TaskAssigned`, `DeliverableSubmitted`, `VerdictSubmitted`,
-  `TaskResolved`.
+- Emits `TaskCreated`, `TaskAssigned`, `VerdictSubmitted`, `TaskResolved`.
 - GitHub linkage: stores `repoUrl`, `issueNumber`, `prNumber` (immutable
   alongside specHash).
 
-### 3.2 `ZeroLanceEscrowVault`
-Adapted from `AxiomStrategyVault` (ERC-20 instead of native) +
-`AxiomPaymentProcessor` fee split.
-- Client deposits USDC into escrow for a task (ERC-20 `safeTransferFrom`).
-- Freelancer submits deliverable (PR ref / file hash / URL) → `submitDeliverable`.
-- AI verdict (signed by oracle) submitted via `submitVerdict`:
-  - `passed` → auto-release to freelancer, platform fee (2–3% bps) to treasury.
-  - `failed` → enters retry window.
-- **Streaming extension**: client streams funds (e.g. weekly) into escrow;
-  per-milestone deliverables verified → auto-release. Reuses the
-  Merkle-action/limit model from the vault.
-- Refund path if task cancelled before assignment.
-- Dispute hook: on deadline/escalation, locks funds pending
-  `ZeroLanceArbitration` resolution.
+### 3.2 `ZeroLanceTaskEscrow`
+Simplified contract combining escrow + AI verification + dispute resolution.
+All state machines (task lifecycle, disputes) live in the backend DB.
 
-### 3.3 `ZeroLanceArbitration`
-- New. Triggered when AI verdict = failed and retry window (2 weeks) elapses,
-  or client disputes.
-- Multi-sig of arbiters (other staked freelancers) vote on-chain:
-  `vote(taskId, winner)`.
-- Quorum + majority → winner takes escrow; arbiters earn `$ZERO` rewards.
-- Arbiter selection: staked `ZeroLanceReputationNFT` holders, randomized per
-  dispute, slashable for collusion (griefing/dishonesty).
+- `deposit(taskId, amount)` — task client only; pulls USDC via `safeTransferFrom`.
+- `submitVerdict(Verdict calldata verdict)` — verifies EIP-712 via
+  `ZeroLanceTeeVerifier`; if `passed` auto-releases escrow; if `failed`
+  marks `verdictFailed` and sets status to `Disputed`.
+- `release(taskId, freelancer, feeBps, treasury)` — **signer-only** (backend);
+  pays `freelancer = amount * (1 - feeBps/10000)` and `treasury = amount * feeBps/10000`.
+- `refund(taskId)` — client only, only when status is `Open`.
+- `resolveDispute(taskId, winner)` — **signer-only**; full escrow pays winner.
+- `mintReputation(taskId, description, dataHash)` — **signer-only**; mints the
+  ERC-7857 NFT.
+- Views: `escrowedOf`, `releasedOf`, `protocolFeeBps`, `protocolTreasury`,
+  `signer`.
+
+The backend signer is the trusted caller for `release`, `resolveDispute`, and
+`mintReputation`. The contract is a dumb payout router — the backend DB is the
+source of truth for all state transitions.
+
+### 3.3 `WaveFundingVault`
+Single contract replacing the old 5-contract wave suite (WaveFundingEscrow +
+WaveFundingVerifier + PointsLedger + ZeroLanceOssWave + ZeroLanceBuildathonWave).
+Handles escrow + points + distribution for all wave programs.
+
+- `createProgram(token, genesisPool, numWaves, feeBps, treasury, specHash)` →
+  programId (organiser).
+- `deposit(programId, amount)` — anyone.
+- `openWave(programId)` → waveId (organiser).
+- `closeWave(programId, waveId)` (organiser).
+- `finalizeWave(programId, waveId)` — locks budget (organiser).
+- `setPoints(waveId, builder, points)` — **signer-only** (backend).
+- `claim(waveId, builder)` — anyone; computes
+  `share = (budget * builderPoints) / totalWavePoints`.
+- `emergencyWithdraw(programId, to, amount)` — owner.
+- Views: `program`, `wave`, `waveCount`, `builderPoints`, `totalWavePoints`,
+  `claimableShare`, `pooled`, `distributed`.
+
+**Distribution formula:**
+```
+share = (netBudget * builderPoints[waveId][builder]) / totalWavePoints[waveId]
+```
+Budget locked at `finalizeWave`. `netBudget = genesisPool * (10000 - feeBps) / 10000`.
+
+All state machines (programs, waves, projects, issues, builders, disputes)
+live in the backend DB. The contract is a dumb payout router: backend signer
+sets points, anyone can claim their share.
 
 ### 3.4 `ZeroLanceReputationNFT`
 Adapted from `AxiomAgentNFT` (ERC-7857 iNFT).
@@ -107,7 +131,6 @@ Adapted from `AxiomAgentNFT` (ERC-7857 iNFT).
 - ERC-20 governance token (OZ ERC20Upgradeable, UUPS).
 - **Governance**: holders vote on protocol upgrades, fee adjustments (via
   `ZeroLanceGovernor`, Phase 2).
-- **Arbiter rewards**: minted/transferred to arbiters on dispute resolution.
 - **Staking**: freelancers stake for verified badge.
 - **Task boosting**: clients burn `$ZERO` to boost urgent/high-value tasks
   (queue priority).
@@ -217,8 +240,9 @@ Vite + React 18 + wagmi v2 + RainbowKit v2 + TanStack Query (same stack as axiom
 ## 8. Go-to-market phasing (build order)
 
 - **Phase 1** (MVP, contracts + backend + GitHub code tasks): `ZeroLanceTaskRegistry`,
-  `ZeroLanceEscrowVault`, `ZeroLanceTeeVerifier`, `ZeroLanceReputationNFT`,
-  `MockUSDC`, backend GitHub runner + verdict orchestrator + indexer, frontend
+  `ZeroLanceTaskEscrow`, `ZeroLanceTaskVerifier`, `ZeroLanceTeeVerifier`, `ZeroLanceReputationNFT`,
+  `WaveFundingEscrow`, `WaveFundingVerifier`, `ZeroLanceOssWave`, `ZeroLanceBuildathonWave`,
+  `PointsLedger`, `MockUSDC`, backend GitHub runner + verdict orchestrator + indexer, frontend
   marketplace. Lowest dispute risk: GitHub-backed code tasks.
 - **Phase 2** (token + disputes): `ZeroLanceToken` ($ZERO), `ZeroLanceArbitration`,
   arbiter staking/rewards, verified-badge staking, task boosting.

@@ -5,277 +5,287 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {MockUSDC} from "src/MockUSDC.sol";
-import {PointsLedger} from "src/zerolancewave/PointsLedger.sol";
-import {ZeroLanceWaveProgram} from "src/zerolancewave/ZeroLanceWaveProgram.sol";
-import {ZeroLanceWaveIssue} from "src/zerolancewave/ZeroLanceWaveIssue.sol";
-import {ZeroLanceWaveBuildathon} from "src/zerolancewave/ZeroLanceWaveBuildathon.sol";
-import {IZeroLanceWaveProgram} from "src/zerolancewave/IZeroLanceWaveProgram.sol";
-import {IZeroLanceWaveIssue} from "src/zerolancewave/IZeroLanceWaveIssue.sol";
+import {WaveFundingVault} from "src/zerolancewave/WaveFundingVault.sol";
+import {IWaveFundingVault} from "src/zerolancewave/IWaveFundingVault.sol";
 
 /// @title WaveFundingTest
-/// @notice Exercises the two new funding modes (Wave Issue + Wave Buildathon) on the
-///         shared WaveProgram: program creation, deposits, wave lifecycle, points,
-///         and proportional claimable distribution.
+/// @notice Tests for the simplified WaveFundingVault contract.
+/// @dev Exercises createProgram, deposit, wave lifecycle (open/close/finalize),
+///      points, claims, emergency withdraw, and access control.
 contract WaveFundingTest is Test {
     MockUSDC usdc;
-    ZeroLanceWaveProgram program;
-    ZeroLanceWaveIssue waveIssue;
-    ZeroLanceWaveBuildathon buildathon;
+    WaveFundingVault vault;
 
     address admin = makeAddr("admin");
     address organizer = makeAddr("organizer");
     address builderA = makeAddr("builderA");
     address builderB = makeAddr("builderB");
     address treasury = makeAddr("treasury");
-    address maintainer = makeAddr("maintainer");
+    address signer = makeAddr("signer");
 
-    uint256 constant GENESIS = 3_000_000e6; // 3M USDC 6-decimals
-    uint256 constant FEE_BPS = 250; // 2.5%
+    uint16 constant FEE_BPS = 250; // 2.5%
 
-    function _deployProgram(uint256 genesis, IZeroLanceWaveProgram.BudgetMethod budgetMethod)
-        internal
-        returns (uint256 programId)
-    {
-        usdc.faucet(organizer, genesis + 1_000_000e6);
+    function setUp() public {
+        usdc = new MockUSDC();
+
+        WaveFundingVault impl = new WaveFundingVault();
+        vault = WaveFundingVault(address(
+            new ERC1967Proxy(
+                address(impl),
+                abi.encodeWithSelector(
+                    WaveFundingVault.initialize.selector, admin, treasury, signer
+                )
+            )
+        ));
+
+        usdc.faucet(organizer, 10_000_000e6);
+        usdc.faucet(builderA, 1_000_000e6);
+        usdc.faucet(builderB, 1_000_000e6);
+
         vm.prank(organizer);
-        usdc.approve(address(program), genesis);
+        usdc.approve(address(vault), type(uint256).max);
+    }
 
+    function _createProgram(uint256 genesisPool, uint16 numWaves) internal returns (uint256 programId) {
         vm.prank(organizer);
-        programId = program.createWaveProgram(
+        programId = vault.createProgram(
             address(usdc),
-            genesis,
-            3, // numWaves
-            1 days, // build window
-            1 days, // eval window
-            0, // compliment window
-            budgetMethod,
-            uint16(FEE_BPS),
+            genesisPool,
+            numWaves,
+            FEE_BPS,
             treasury,
             bytes32("spec")
         );
     }
 
-    function setUp() public {
-        usdc = new MockUSDC();
-
-        // ZeroLanceWaveProgram (proxy)
-        ZeroLanceWaveProgram progImpl = new ZeroLanceWaveProgram();
-        bytes memory progInit =
-            abi.encodeWithSelector(ZeroLanceWaveProgram.initialize.selector, admin);
-        program = ZeroLanceWaveProgram(address(new ERC1967Proxy(address(progImpl), progInit)));
-
-        // ZeroLanceWaveIssue (proxy)
-        ZeroLanceWaveIssue wiImpl = new ZeroLanceWaveIssue();
-        bytes memory wiInit = abi.encodeWithSelector(
-            ZeroLanceWaveIssue.initialize.selector,
-            admin,
-            address(program)
-        );
-        waveIssue = ZeroLanceWaveIssue(address(new ERC1967Proxy(address(wiImpl), wiInit)));
-
-        // ZeroLanceWaveBuildathon (proxy)
-        ZeroLanceWaveBuildathon baImpl = new ZeroLanceWaveBuildathon();
-        bytes memory baInit = abi.encodeWithSelector(
-            ZeroLanceWaveBuildathon.initialize.selector,
-            admin,
-            address(program)
-        );
-        buildathon = ZeroLanceWaveBuildathon(address(new ERC1967Proxy(address(baImpl), baInit)));
-
-        // Grant the program the authority to award on behalf of both modes by
-        // granting the mode contracts as awarders on the program.
+    function _openCloseFinalize(uint256 programId) internal returns (uint256 waveId) {
+        vm.prank(organizer);
+        waveId = vault.openWave(programId);
+        vm.prank(organizer);
+        vault.closeWave(programId, waveId);
+        vm.prank(organizer);
+        vault.finalizeWave(programId, waveId);
     }
 
-    // ── Buildathon flow ──────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    // Test 1: createProgram + deposit
+    // ─────────────────────────────────────────────────────────────────────
 
-    function test_Buildathon_DistributesProportionally() public {
+    function test_CreateProgramAndDeposit() public {
         uint256 genesis = 300_000e6;
-        uint256 programId = _deployProgram(genesis, IZeroLanceWaveProgram.BudgetMethod.FixedPerWave);
+        uint256 programId = _createProgram(genesis, 3);
 
-        IZeroLanceWaveProgram.Program memory p = program.program(programId);
-        // Grant the buildathon contract as an awarder for this program so judge
-        // points route through.
+        assertGt(programId, 0, "programId > 0");
+        assertEq(vault.pooled(programId), genesis, "pooled == genesis after create");
+
         vm.prank(organizer);
-        program.grantAwarder(programId, address(buildathon), true);
-
-        // Open wave 0.
-        vm.prank(organizer);
-        uint256 waveId = program.openWave(programId);
-
-        // Teams register.
-        vm.prank(organizer);
-        buildathon.registerTeam(programId, builderA, bytes32("repoA"));
-        uint256 teamB;
-        vm.prank(organizer);
-        teamB = buildathon.registerTeam(programId, builderB, bytes32("repoB"));
-
-        // Submit demos during build window.
-        vm.startPrank(organizer);
-        uint256 subA = buildathon.submit(programId, 0, bytes32("demoA"), bytes32("repoA"));
-        uint256 subB = buildathon.submit(programId, teamB, bytes32("demoB"), bytes32("repoB"));
-        vm.stopPrank();
-
-        // Close build -> evaluation; judges score.
-        vm.warp(block.timestamp + 1 days + 1);
-        vm.prank(organizer);
-        program.closeWave(programId, waveId); // -> Evaluation, evalEndAt = now+evalWindow
-
-        // Judge scores: A gets 200 points, B gets 100 points.
-        vm.startPrank(organizer);
-        buildathon.setSubmissionPoints(programId, subA, 200);
-        buildathon.setSubmissionPoints(programId, subB, 100);
-        vm.stopPrank();
-
-        // total points = 300, wave budget = genesis/3 = 100k USDC, netBudget=97.5k
-        assertEq(program.pointsLedger(programId).totalPoints(waveId), 300);
-
-        // Close evaluation -> freeze points; finalize.
-        vm.warp(block.timestamp + 1 days + 1);
-        vm.prank(organizer);
-        program.closeEvaluation(programId, waveId);
-        vm.prank(organizer);
-        program.finalizeWave(programId, waveId);
-
-        uint256 budget = program.waveBudget(programId, waveId);
-        assertEq(budget, genesis / 3); // FixedPerWave
-        uint256 netBudget = program.totalClaimable(programId, waveId);
-        assertEq(netBudget, (budget * 9750) / 10000);
-
-        // Share A = (200/300) * netBudget ; B = (100/300) * netBudget
-        uint256 shareA = program.claimableShare(programId, waveId, builderA);
-        uint256 shareB = program.claimableShare(programId, waveId, builderB);
-        assertEq(shareA, (netBudget * 2) / 3);
-        assertEq(shareB, netBudget / 3);
-
-        // Claim by both (budget from deposit already held by program).
-        // Note: builderA/builderB need the token balance to be able to receive.
-        uint256 balA0 = usdc.balanceOf(builderA);
-        vm.prank(builderA);
-        program.claim(programId, waveId);
-        assertEq(usdc.balanceOf(builderA) - balA0, shareA);
-
-        uint256 balB0 = usdc.balanceOf(builderB);
-        vm.prank(builderB);
-        program.claim(programId, waveId);
-        assertEq(usdc.balanceOf(builderB) - balB0, shareB);
+        vault.deposit(programId, 50_000e6);
+        assertEq(vault.pooled(programId), genesis + 50_000e6, "pooled == genesis + deposit");
     }
 
-    function test_Buildathon_ZeroPointsCannotClaim() public {
+    // ─────────────────────────────────────────────────────────────────────
+    // Test 2: open + finalize wave (FixedPerWave budget)
+    // ─────────────────────────────────────────────────────────────────────
+
+    function test_OpenAndFinalizeWave() public {
         uint256 genesis = 300_000e6;
-        uint256 programId = _deployProgram(genesis, IZeroLanceWaveProgram.BudgetMethod.FixedPerWave);
-        vm.prank(organizer);
-        program.grantAwarder(programId, address(buildathon), true);
+        uint256 programId = _createProgram(genesis, 3);
 
         vm.prank(organizer);
-        uint256 waveId = program.openWave(programId);
-        vm.prank(organizer);
-        buildathon.registerTeam(programId, builderA, bytes32("repoA"));
-        vm.prank(organizer);
-        uint256 subA = buildathon.submit(programId, 0, bytes32("demoA"), bytes32("repoA"));
+        vault.deposit(programId, genesis);
 
-        vm.warp(block.timestamp + 1 days + 1);
         vm.prank(organizer);
-        program.closeWave(programId, waveId);
-        vm.warp(block.timestamp + 2 days + 2);
-        vm.prank(organizer);
-        program.closeEvaluation(programId, waveId);
-        vm.prank(organizer);
-        program.finalizeWave(programId, waveId);
+        uint256 waveId = vault.openWave(programId);
+        assertEq(vault.waveCount(programId), 1, "waveCount == 1");
 
-        // No points -> nothing to claim.
-        assertEq(program.pointsLedger(programId).totalPoints(waveId), 0);
-        assertEq(program.claimableShare(programId, waveId, builderA), 0);
+        vm.prank(organizer);
+        vault.closeWave(programId, waveId);
+        vm.prank(organizer);
+        vault.finalizeWave(programId, waveId);
+
+        IWaveFundingVault.Wave memory wave = vault.wave(waveId);
+        assertEq(uint8(wave.status), uint8(IWaveFundingVault.WaveStatus.Finalized), "wave Finalized");
+        // Budget = genesisPool / numWaves (FixedPerWave)
+        assertEq(wave.budget, genesis / 3, "budget = genesisPool / numWaves");
     }
 
-    // ── Wave Issue flow ──────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    // Test 3: PctOfRemaining budget method
+    // ─────────────────────────────────────────────────────────────────────
 
-    function test_WaveIssue_MergeAwardsAndDistributes() public {
-        uint256 genesis = 300_000e6;
-        uint256 programId = _deployProgram(genesis, IZeroLanceWaveProgram.BudgetMethod.FixedPerWave);
-        vm.prank(organizer);
-        program.grantAwarder(programId, address(waveIssue), true);
-
-        // Organizer accepts a repo into the wave program.
-        bytes32 repoHash = bytes32("org/repo");
-        vm.prank(organizer);
-        waveIssue.acceptRepo(programId, repoHash, true);
-
-        // Maintainer opens an issue with AI-suggested base points (200 max).
-        vm.prank(maintainer);
-        uint256 issueId = waveIssue.createIssue(programId, repoHash, bytes32("spec"), 150, 2);
-
-        // Open a wave so builders can claim.
-        vm.prank(organizer);
-        uint256 waveId = program.openWave(programId);
-
-        // Builder claims and submits a PR.
-        vm.prank(builderA);
-        waveIssue.claimIssue(issueId);
-        vm.prank(builderA);
-        waveIssue.submitPr(issueId, bytes32("pr-diff"), 42);
-
-        // Maintainer confirms the merge -> builder earns base points.
-        vm.prank(maintainer);
-        waveIssue.confirmMerge(issueId);
-        assertEq(program.pointsLedger(programId).totalPoints(waveId), 150);
-
-        // Advancement: close build -> eval, close eval, finalize.
-        vm.warp(block.timestamp + 1 days + 1);
-        vm.prank(organizer);
-        program.closeWave(programId, waveId);
-        vm.warp(block.timestamp + 2 days + 2);
-        vm.prank(organizer);
-        program.closeEvaluation(programId, waveId);
-        vm.prank(organizer);
-        program.finalizeWave(programId, waveId);
-
-        uint256 budget = program.waveBudget(programId, waveId);
-        assertEq(budget, genesis / 3);
-        uint256 netBudget = program.totalClaimable(programId, waveId);
-        // 100% of points to builderA → 100% of net budget.
-        assertEq(program.claimableShare(programId, waveId, builderA), netBudget);
-
-        uint256 bal0 = usdc.balanceOf(builderA);
-        vm.prank(builderA);
-        program.claim(programId, waveId);
-        assertEq(usdc.balanceOf(builderA) - bal0, netBudget);
-    }
-
-    function test_WaveIssue_RepoNotAcceptedReverts() public {
-        uint256 genesis = 300_000e6;
-        uint256 programId = _deployProgram(genesis, IZeroLanceWaveProgram.BudgetMethod.FixedPerWave);
-        vm.expectRevert(IZeroLanceWaveIssue.RepoNotAccepted.selector);
-        vm.prank(maintainer);
-        waveIssue.createIssue(programId, bytes32("unapproved"), bytes32("spec"), 150, 2);
-    }
-
-    function test_Buildathon_AdjacentWave_Budget() public {
-        // PctOfRemaining mode: two waves, each gets half the pool.
+    function test_PctOfRemaining_Budget() public {
         uint256 genesis = 200_000e6;
-        uint256 programId = _deployProgram(genesis, IZeroLanceWaveProgram.BudgetMethod.PctOfRemaining);
-        vm.prank(organizer);
-        program.grantAwarder(programId, address(buildathon), true);
+        uint256 programId = _createProgram(genesis, 2);
 
         vm.prank(organizer);
-        uint256 w1 = program.openWave(programId);
-        vm.prank(organizer);
-        buildathon.registerTeam(programId, builderA, bytes32("repoA"));
-        vm.prank(organizer);
-        uint256 subA1 = buildathon.submit(programId, 0, bytes32("demoA1"), bytes32("repoA"));
+        vault.deposit(programId, genesis);
 
-        vm.warp(block.timestamp + 1 days + 1);
-        vm.prank(organizer);
-        program.closeWave(programId, w1);
-        vm.prank(organizer);
-        buildathon.setSubmissionPoints(programId, subA1, 100);
-        vm.warp(block.timestamp + 1 days + 1);
-        vm.prank(organizer);
-        program.closeEvaluation(programId, w1);
-        vm.prank(organizer);
-        program.finalizeWave(programId, w1);
+        uint256 waveId = _openCloseFinalize(programId);
 
-        uint256 budget1 = program.waveBudget(programId, w1);
-        // PctOfRemaining: with 3 waves and 1 finalized, slice = pool/2 (2 remaining incl. current).
-        assertGt(budget1, 0);
+        IWaveFundingVault.Wave memory wave = vault.wave(waveId);
+        // PctOfRemaining: pooled / (numWaves - waveSeq + 1) = 200k / 2 = 100k
+        assertEq(wave.budget, genesis / 2, "budget = pooled / remaining");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Test 4: setPoints + claim (pro-rata distribution, net of fee)
+    // ─────────────────────────────────────────────────────────────────────
+
+    function test_SetPointsAndClaim() public {
+        uint256 genesis = 300_000e6;
+        uint256 programId = _createProgram(genesis, 3);
+
+        vm.prank(organizer);
+        vault.deposit(programId, genesis);
+
+        vm.prank(organizer);
+        uint256 waveId = vault.openWave(programId);
+
+        // Set points while wave is Open.
+        vm.prank(signer);
+        vault.setPoints(waveId, builderA, 200);
+        vm.prank(signer);
+        vault.setPoints(waveId, builderB, 100);
+
+        assertEq(vault.totalWavePoints(waveId), 300, "totalWavePoints == 300");
+
+        vm.prank(organizer);
+        vault.closeWave(programId, waveId);
+        vm.prank(organizer);
+        vault.finalizeWave(programId, waveId);
+
+        // Budget = genesisPool / numWaves = 100_000e6
+        // netBudget = 100_000e6 * (10000 - 250) / 10000 = 97_500e6
+        // builderA share = 97_500e6 * 200/300 = 65_000e6
+        // builderB share = 97_500e6 * 100/300 = 32_500e6
+        uint256 netBudget = 97_500e6;
+        uint256 shareA = netBudget * 200 / 300;
+        uint256 shareB = netBudget * 100 / 300;
+
+        assertEq(shareA, 65_000e6, "expected shareA");
+        assertEq(shareB, 32_500e6, "expected shareB");
+
+        uint256 balABefore = usdc.balanceOf(builderA);
+        vm.prank(builderA);
+        vault.claim(waveId, builderA);
+        assertEq(usdc.balanceOf(builderA) - balABefore, shareA, "builderA claim");
+
+        uint256 balBBefore = usdc.balanceOf(builderB);
+        vm.prank(builderB);
+        vault.claim(waveId, builderB);
+        assertEq(usdc.balanceOf(builderB) - balBBefore, shareB, "builderB claim");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Test 5: zero points cannot claim
+    // ─────────────────────────────────────────────────────────────────────
+
+    function test_ZeroPointsCannotClaim() public {
+        uint256 programId = _createProgram(300_000e6, 3);
+
+        vm.prank(organizer);
+        vault.deposit(programId, 300_000e6);
+
+        uint256 waveId = _openCloseFinalize(programId);
+
+        vm.expectRevert(IWaveFundingVault.ZeroBudget.selector);
+        vm.prank(builderA);
+        vault.claim(waveId, builderA);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Test 6: double claim reverts
+    // ─────────────────────────────────────────────────────────────────────
+
+    function test_DoubleClaimReverts() public {
+        uint256 programId = _createProgram(300_000e6, 3);
+
+        vm.prank(organizer);
+        vault.deposit(programId, 300_000e6);
+
+        vm.prank(organizer);
+        uint256 waveId = vault.openWave(programId);
+
+        vm.prank(signer);
+        vault.setPoints(waveId, builderA, 100);
+
+        vm.prank(organizer);
+        vault.closeWave(programId, waveId);
+        vm.prank(organizer);
+        vault.finalizeWave(programId, waveId);
+
+        vm.prank(builderA);
+        vault.claim(waveId, builderA);
+
+        vm.expectRevert(IWaveFundingVault.AlreadyClaimed.selector);
+        vm.prank(builderA);
+        vault.claim(waveId, builderA);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Test 7: claim before finalize reverts
+    // ─────────────────────────────────────────────────────────────────────
+
+    function test_ClaimBeforeFinalizeReverts() public {
+        uint256 programId = _createProgram(300_000e6, 3);
+
+        vm.prank(organizer);
+        vault.deposit(programId, 300_000e6);
+
+        vm.prank(organizer);
+        uint256 waveId = vault.openWave(programId);
+
+        vm.prank(signer);
+        vault.setPoints(waveId, builderA, 100);
+
+        vm.expectRevert(IWaveFundingVault.WrongStatus.selector);
+        vm.prank(builderA);
+        vault.claim(waveId, builderA);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Test 8: emergency withdraw
+    // ─────────────────────────────────────────────────────────────────────
+
+    function test_EmergencyWithdraw() public {
+        uint256 programId = _createProgram(300_000e6, 3);
+
+        vm.prank(organizer);
+        vault.deposit(programId, 300_000e6);
+
+        uint256 balBefore = usdc.balanceOf(organizer);
+        vm.prank(admin);
+        vault.emergencyWithdraw(programId, organizer, 300_000e6);
+        assertEq(usdc.balanceOf(organizer) - balBefore, 300_000e6, "organizer received funds");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Test 9: only organizer can open wave
+    // ─────────────────────────────────────────────────────────────────────
+
+    function test_NotOrganizerCannotOpenWave() public {
+        uint256 programId = _createProgram(300_000e6, 3);
+
+        vm.expectRevert(IWaveFundingVault.NotOrganizer.selector);
+        vm.prank(builderA);
+        vault.openWave(programId);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Test 10: only signer can set points
+    // ─────────────────────────────────────────────────────────────────────
+
+    function test_NotSignerCannotSetPoints() public {
+        uint256 programId = _createProgram(300_000e6, 3);
+
+        vm.prank(organizer);
+        vault.deposit(programId, 300_000e6);
+
+        vm.prank(organizer);
+        uint256 waveId = vault.openWave(programId);
+
+        vm.expectRevert(IWaveFundingVault.NotSigner.selector);
+        vm.prank(builderA);
+        vault.setPoints(waveId, builderA, 100);
     }
 }

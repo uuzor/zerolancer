@@ -5,6 +5,17 @@ export interface OGNetwork {
   readonly storageRpc: string;
   readonly computeRouterUrl: string;
   readonly blockExplorer: string;
+  readonly addresses?: Partial<{
+    readonly waveVault: `0x${string}`;
+    readonly taskEscrow: `0x${string}`;
+    readonly taskRegistry: `0x${string}`;
+    readonly taskVerifier: `0x${string}`;
+    // Deprecated aliases
+    readonly waveFundingEscrow: `0x${string}`;
+    readonly waveFundingVerifier: `0x${string}`;
+    readonly ossWave: `0x${string}`;
+    readonly buildathonWave: `0x${string}`;
+  }>;
 }
 
 export const ARISTOTLE_CHAIN_ID = 16661;

@@ -8,21 +8,20 @@ import {MockUSDC} from "../src/MockUSDC.sol";
 import {ZeroLanceToken} from "../src/ZeroLanceToken.sol";
 import {ZeroLanceTeeVerifier} from "../src/verifiers/ZeroLanceTeeVerifier.sol";
 import {ZeroLanceTaskRegistry} from "../src/ZeroLanceTaskRegistry.sol";
-import {ZeroLanceEscrowVault} from "../src/ZeroLanceEscrowVault.sol";
-import {ZeroLanceArbitration} from "../src/ZeroLanceArbitration.sol";
 import {ZeroLanceReputationNFT} from "../src/ZeroLanceReputationNFT.sol";
+import {ZeroLanceTaskEscrow} from "../src/ZeroLanceTaskEscrow.sol";
 
-/// @notice Deploys the full ZeroLance protocol suite behind UUPS proxies and wires
-///         the cross-contract references. Writes a deployment manifest to
-///         ../../docs/deployments/<network>-<date>.json (fs_permissions in foundry.toml).
+/// @notice Deploys the simplified ZeroLance protocol suite behind UUPS proxies.
+///         The task escrow is a single contract that handles deposit, release,
+///         refund, dispute resolution, and reputation minting. All state
+///         machines (task lifecycle, disputes) live in the backend DB.
 contract Deploy is Script {
     struct Addrs {
         address usdc;
         address zeroToken;
         address teeVerifier;
         address taskRegistry;
-        address escrow;
-        address arbitration;
+        address taskEscrow;
         address reputationNFT;
     }
 
@@ -54,9 +53,8 @@ contract Deploy is Script {
             )
         );
 
-        // 4. Reputation NFT (depends on $ZERO, escrow set after escrow deploy).
+        // 4. Reputation NFT (depends on $ZERO; escrow reference set after escrow deploy).
         ZeroLanceReputationNFT repImpl = new ZeroLanceReputationNFT();
-        // Deploy with a placeholder escrow, then re-point after escrow is wired.
         ZeroLanceReputationNFT reputationNFT = ZeroLanceReputationNFT(
             address(
                 new ERC1967Proxy(
@@ -66,49 +64,30 @@ contract Deploy is Script {
             )
         );
 
-        // 5. Task registry (authorized setter = escrow, set after escrow deploy).
+        // 5. Task registry (authorized setter set after escrow deploy).
         ZeroLanceTaskRegistry registryImpl = new ZeroLanceTaskRegistry();
         ZeroLanceTaskRegistry taskRegistry = ZeroLanceTaskRegistry(
             address(new ERC1967Proxy(address(registryImpl), abi.encodeCall(ZeroLanceTaskRegistry.initialize, (admin, admin))))
         );
 
-        // 6. Arbitration (depends on escrow, task registry, reputation NFT, $ZERO).
-        ZeroLanceArbitration arbImpl = new ZeroLanceArbitration();
-        ZeroLanceArbitration arbitration = ZeroLanceArbitration(
-            address(
-                new ERC1967Proxy(
-                    address(arbImpl),
-                    abi.encodeCall(
-                        ZeroLanceArbitration.initialize,
-                        (admin, address(taskRegistry), address(reputationNFT), address(zeroToken), 10e18, 67, admin)
-                    )
-                )
-            )
-        );
-
-        // 7. Escrow vault (depends on task registry, verifier, treasury, arbitration).
-        ZeroLanceEscrowVault escrowImpl = new ZeroLanceEscrowVault();
-        ZeroLanceEscrowVault escrow = ZeroLanceEscrowVault(
+        // 6. Task escrow (depends on task registry + tee verifier + reputation).
+        //    Single contract handling deposit, release, refund, dispute, reputation.
+        ZeroLanceTaskEscrow escrowImpl = new ZeroLanceTaskEscrow();
+        ZeroLanceTaskEscrow taskEscrow = ZeroLanceTaskEscrow(
             address(
                 new ERC1967Proxy(
                     address(escrowImpl),
                     abi.encodeCall(
-                        ZeroLanceEscrowVault.initialize,
-                        (address(taskRegistry), address(teeVerifier), treasury, 250, address(arbitration), admin)
+                        ZeroLanceTaskEscrow.initialize,
+                        (admin, address(taskRegistry), treasury, 250, address(teeVerifier), address(reputationNFT), oracleSigner)
                     )
                 )
             )
         );
 
-        // 8. Wire cross-contract references.
-        //    Arbitration and reputation NFT are deployed before the escrow
-        //    (the escrow depends on arbitration's address), so their escrow
-        //    references must be re-pointed here.
-        taskRegistry.setAuthorizedSetter(address(escrow));
-        arbitration.setEscrow(address(escrow));
-        reputationNFT.setEscrow(address(escrow));
-        reputationNFT.grantRole(reputationNFT.MINTER_ROLE(), address(escrow));
-        escrow.setReputationNft(address(reputationNFT));
+        // 7. Wire cross-contract references.
+        taskRegistry.setAuthorizedSetter(address(taskEscrow));
+        reputationNFT.setEscrow(address(taskEscrow));
 
         vm.stopBroadcast();
 
@@ -117,22 +96,19 @@ contract Deploy is Script {
             zeroToken: address(zeroToken),
             teeVerifier: address(teeVerifier),
             taskRegistry: address(taskRegistry),
-            escrow: address(escrow),
-            arbitration: address(arbitration),
+            taskEscrow: address(taskEscrow),
             reputationNFT: address(reputationNFT)
         });
 
-        // Write manifest.
         _writeManifest(a, admin);
 
         // solhint-disable no-console
         console.log("=== ZeroLance deployed ===");
-        console.log("MockUSDC:            ", a.usdc);
-        console.log("ZeroLanceToken:      ", a.zeroToken);
-        console.log("ZeroLanceTeeVerifier:", a.teeVerifier);
+        console.log("MockUSDC:             ", a.usdc);
+        console.log("ZeroLanceToken:       ", a.zeroToken);
+        console.log("ZeroLanceTeeVerifier: ", a.teeVerifier);
         console.log("ZeroLanceTaskRegistry:", a.taskRegistry);
-        console.log("ZeroLanceEscrowVault:", a.escrow);
-        console.log("ZeroLanceArbitration:", a.arbitration);
+        console.log("ZeroLanceTaskEscrow:  ", a.taskEscrow);
         console.log("ZeroLanceReputationNFT:", a.reputationNFT);
         // solhint-enable no-console
     }
@@ -146,8 +122,7 @@ contract Deploy is Script {
             '"zeroToken":"', vm.toString(a.zeroToken), '",',
             '"teeVerifier":"', vm.toString(a.teeVerifier), '",',
             '"taskRegistry":"', vm.toString(a.taskRegistry), '",',
-            '"escrow":"', vm.toString(a.escrow), '",',
-            '"arbitration":"', vm.toString(a.arbitration), '",',
+            '"taskEscrow":"', vm.toString(a.taskEscrow), '",',
             '"reputationNFT":"', vm.toString(a.reputationNFT), '"}'
         );
         vm.writeFile(string.concat("../../docs/deployments/", network, ".json"), json);

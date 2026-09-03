@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Interface } from "ethers";
-import { ZEROLANCE_ESCROW_VAULT_ABI, type Verdict } from "@zerolance/config";
+import { ZEROLANCE_TASK_VERIFIER_ABI, type Verdict } from "@zerolance/config";
 
 /// Regression test for the submitVerdict ABI tuple encoding bug.
 ///
@@ -15,7 +15,7 @@ import { ZEROLANCE_ESCROW_VAULT_ABI, type Verdict } from "@zerolance/config";
 ///   1. The array form encodes to the expected 4-byte selector + full tuple.
 ///   2. The object form encodes to a selector + EMPTY tuple (the bug).
 describe("submitVerdict ABI tuple encoding", () => {
-  const iface = new Interface([...ZEROLANCE_ESCROW_VAULT_ABI]);
+  const iface = new Interface([...ZEROLANCE_TASK_VERIFIER_ABI]);
 
   const verdict: Verdict = {
     taskId: 42n,

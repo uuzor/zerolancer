@@ -16,13 +16,10 @@ import type { InterfaceAbi } from "ethers";
 
 import { HTTP, type AddressName } from "@zerolance/config";
 import {
-  ZEROLANCE_ESCROW_VAULT_ABI,
   ZEROLANCE_TASK_REGISTRY_ABI,
-  ZEROLANCE_ARBITRATION_ABI,
+  ZEROLANCE_TASK_ESCROW_ABI,
   ZEROLANCE_REPUTATION_NFT_ABI,
-  ZEROLANCE_WAVE_PROGRAM_ABI,
-  ZEROLANCE_WAVE_ISSUE_ABI,
-  ZEROLANCE_WAVE_BUILDATHON_ABI,
+  WAVE_FUNDING_VAULT_ABI,
 } from "@zerolance/config";
 import {
   createApiKeyAuth,
@@ -49,7 +46,7 @@ import { registerDaRoutes } from "./routers/da.js";
 import { attachWebsocket } from "./ws/handler.js";
 import { DefaultOracleClient, type OracleClient } from "./oracle/client.js";
 import { EscrowClient } from "./escrow/client.js";
-import { WaveClient } from "./wave/client.js";
+import { WaveFundingVaultClient } from "./wave/index.js";
 import { StorageService } from "./storage/service.js";
 import { DaPublisher } from "./da/publisher.js";
 import { VerdictOrchestrator } from "./compute/verdict-orchestrator.js";
@@ -71,7 +68,7 @@ export interface ServerConfig {
   oracleClient: OracleClient | null;
   escrowClient: EscrowClient | null;
   verdictOrchestrator: VerdictOrchestrator | null;
-  waveClient: WaveClient | null;
+  waveVaultClient: WaveFundingVaultClient | null;
   storageService: StorageService;
   daPublisher: DaPublisher | null;
   indexers: Indexer[];
@@ -126,6 +123,7 @@ export async function createApp(env: BackendEnv): Promise<{
   }
 
   let escrowClient: EscrowClient | null = null;
+  const taskVerifierAddr = env.ZERO_TASK_VERIFIER_ADDRESS as `0x${string}` | undefined;
   if (addresses.escrowVault && addresses.taskRegistry && addresses.mockUsdc) {
     escrowClient = new EscrowClient({
       escrowAddress: addresses.escrowVault,
@@ -133,6 +131,7 @@ export async function createApp(env: BackendEnv): Promise<{
       paymentTokenAddress: addresses.mockUsdc,
       provider,
       signer,
+      verifierAddress: taskVerifierAddr,
     });
   }
 
@@ -156,16 +155,16 @@ export async function createApp(env: BackendEnv): Promise<{
     );
   }
 
-  // Wave funding stack (optional until the contract is deployed).
-  let waveClient: WaveClient | null = null;
-  const waveProgram = env.ZERO_WAVE_PROGRAM_ADDRESS as `0x${string}` | undefined;
-  if (waveProgram) {
-    waveClient = new WaveClient({
-      waveProgramAddress: waveProgram,
+  // Wave funding vault — constructed only when ZERO_WAVE_VAULT_ADDRESS is set.
+  let waveVaultClient: WaveFundingVaultClient | null = null;
+  const waveVaultAddr = env.ZERO_WAVE_VAULT_ADDRESS as `0x${string}` | undefined;
+  if (waveVaultAddr) {
+    waveVaultClient = new WaveFundingVaultClient({
+      vaultAddress: waveVaultAddr,
       provider,
       signer,
     });
-    log.info("WaveClient configured", { waveProgram });
+    log.info("WaveFundingVaultClient configured", { vault: waveVaultAddr });
   }
 
   // 0G Storage service for artifact blobs (real 0G when signer + storage RPC set).
@@ -202,13 +201,8 @@ export async function createApp(env: BackendEnv): Promise<{
       },
       {
         address: addresses.escrowVault,
-        abi: [...ZEROLANCE_ESCROW_VAULT_ABI],
+        abi: [...ZEROLANCE_TASK_ESCROW_ABI],
         source: "escrow",
-      },
-      {
-        address: addresses.arbitration,
-        abi: [...ZEROLANCE_ARBITRATION_ABI],
-        source: "arbitration",
       },
       {
         address: addresses.reputationNft,
@@ -216,19 +210,9 @@ export async function createApp(env: BackendEnv): Promise<{
         source: "reputation",
       },
       {
-        address: (env.ZERO_WAVE_PROGRAM_ADDRESS as `0x${string}` | undefined),
-        abi: [...ZEROLANCE_WAVE_PROGRAM_ABI],
-        source: "wave-program",
-      },
-      {
-        address: (env.ZERO_WAVE_ISSUE_ADDRESS as `0x${string}` | undefined),
-        abi: [...ZEROLANCE_WAVE_ISSUE_ABI],
-        source: "wave-issue",
-      },
-      {
-        address: (env.ZERO_WAVE_BUILDATHON_ADDRESS as `0x${string}` | undefined),
-        abi: [...ZEROLANCE_WAVE_BUILDATHON_ABI],
-        source: "wave-buildathon",
+        address: (env.ZERO_WAVE_VAULT_ADDRESS as `0x${string}` | undefined),
+        abi: [...WAVE_FUNDING_VAULT_ABI],
+        source: "wave-vault",
       },
     ];
     for (const def of defs) {
@@ -258,7 +242,7 @@ export async function createApp(env: BackendEnv): Promise<{
     oracleClient,
     escrowClient,
     verdictOrchestrator,
-    waveClient,
+    waveVaultClient,
     storageService,
     daPublisher,
     indexers,
